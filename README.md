@@ -2,6 +2,8 @@
 
 **Ultimate Cross-Platform Binary Exploitation Framework**
 
+<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/66969605-fcae-48b9-9096-350778bdab99" />
+
 > ⚠️ **LEGAL WARNING**: This software is strictly for authorized use in
 > controlled environments (CTF competitions, penetration testing with written
 > permission, security research). Unauthorized use against third-party systems
