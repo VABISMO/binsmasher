@@ -534,3 +534,9 @@ echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
 ```bash
 sudo apt install wine wine64
 ```
+
+### Donations
+
+ETH - 0xD773B73C7ea4862020b7B5B58f31Ea491f5a9bA3
+BTC - bc1ql6qvsk67hl5vz346kx4gueqjhp6me9ss8eflgt
+SOLANA - GYBiTvVbPvPJP7ZK5oaqc9w6UtHvd6NkhSPP2UBhDvfh
