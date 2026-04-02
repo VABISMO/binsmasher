@@ -1,4 +1,6 @@
 venv/
 venv/*
 venv
-
+malicious.bin
+malicious.mp3
+malicious*

