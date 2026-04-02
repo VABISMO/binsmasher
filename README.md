@@ -30,27 +30,44 @@
 ## Project Structure
 
 ```
-binsmasher_final/
+├── LICENSE
 ├── README.md
 ├── requirements.txt
-│
-├── src/                          ← Framework source code
-│   ├── main.py                   → Entry point, CLI, orchestration
-│   ├── analyzer.py               → Static & dynamic analysis
-│   ├── exploiter.py              → Exploit engine, all bypass techniques
-│   ├── fuzzer.py                 → AFL++, boofuzz, mutation, BPF, QUIC/DoS
-│   └── utils.py                  → Logging, ExploitConfig, Rich helpers
-│
-└── tests/
-    ├── test_suite.py             ← Full automated test harness
-    └── src/                      ← Vulnerable binary source code
-        ├── Makefile              → Build all / clean
-        ├── t1_stack_noprotect.c  → Stack overflow — no protections
-        ├── t2_stack_nx.c         → Stack overflow + NX
-        ├── t3_stack_canary.c     → Stack overflow + stack canary
-        ├── t4_fmtstr.c           → Format string vulnerability
-        ├── t5_heap.c             → Heap overflow — fn-pointer overwrite
-        └── t6_64bit_nx.c         → 64-bit unbounded read() + NX
+├── src
+│   ├── analyzer.py
+│   ├── exploiter.py
+│   ├── file_exploiter.py
+│   ├── fuzzer.py
+│   ├── main.py
+│   └── utils.py
+└── tests
+    ├── bins
+    │   ├── t10_safestack
+    │   ├── t11_heap_glibc234
+    │   ├── t1_stack_noprotect
+    │   ├── t2_stack_nx
+    │   ├── t3_stack_canary
+    │   ├── t4_fmtstr
+    │   ├── t5_heap
+    │   ├── t6_64bit_nx
+    │   ├── t7_cfi_vtable
+    │   ├── t8_seccomp
+    │   └── t9_stripped
+    ├── src
+    │   ├── Makefile
+    │   ├── t10_safestack.c
+    │   ├── t11_heap_glibc234.c
+    │   ├── t1_stack_noprotect.c
+    │   ├── t2_stack_nx.c
+    │   ├── t3_stack_canary.c
+    │   ├── t4_fmtstr.c
+    │   ├── t5_heap.c
+    │   ├── t6_64bit_nx.c
+    │   ├── t7_cfi_vtable.c
+    │   ├── t8_seccomp.c
+    │   └── t9_stripped.c
+    └── test_suite.py
+
 ```
 
 The `tests/bins/` directory is created automatically by `make`.
@@ -414,19 +431,23 @@ python3 main.py solana \
 
 | Protection | Techniques implemented |
 |---|---|
-| **NX / DEP** | Direct shellcode (NX off), ret2libc, ret2plt, ret2csu, SROP, ret2dlresolve |
-| **ASLR** | GOT leak via ret2plt, `%p` format-string chain, 32-bit brute-force, one_gadget |
-| **PIE** | `%p` stack walk → page-aligned base, 12-bit partial overwrite |
-| **Stack Canary** | `%p` oracle (format string), byte-by-byte brute force (fork servers) |
-| **Full RELRO** | ret2plt chains only — no GOT overwrite |
-| **Partial RELRO** | GOT overwrite via pwntools `fmtstr_payload` |
-| **SafeSEH (Windows)** | POP POP RET scan in unprotected PE sections |
-| **CFG (Windows)** | `GuardCFFunctionTable` enumeration for valid indirect call targets |
-| **Heap glibc ≥ 2.32** | Safe-linking bypass: XOR key recovered via heap address leak |
-| **Heap glibc < 2.32** | tcache poisoning, fastbin dup, unsorted bin attack |
-| **UAF / double-free** | vtable / function-pointer overwrite on freed chunk |
-| **FORTIFY_SOURCE** | shellcraft paths that avoid `_chk` variants |
-| **CET / Shadow Stack** | SROP via crafted signal frame when conventional ROP is blocked |
+| NX / DEP | ✅ Full (ret2libc, ret2csu, SROP, ret2dlresolve) |
+| ASLR | ✅ Full (GOT leak, PIE leak, brute-force, one_gadget) |
+| Stack Canary | ✅ Full (fmt oracle + byte-by-byte brute force) |
+| RELRO (Full/Partial) | ✅ Full |
+| FORTIFY_SOURCE | ✅ Full |
+| Heap glibc <2.32 | ✅ Full (tcache, fastbin, unsorted bin) |
+| Heap glibc ≥2.32 | ✅ Full (safe-linking bypass) |
+| Heap glibc 2.34+ | ✅ Full (hook-less: FSOP, Botcake, key bypass) |
+| SafeSEH (Windows) | ✅ Full |
+| CFG (Windows) | ✅ Full |
+| CFI (Clang/GCC) | ✅ Partial (valid-target pivot, fake vtable) |
+| PAC (ARM64) | ✅ Partial (gadget scan + brute-force template) |
+| seccomp-bpf | ✅ Partial (analysis + constrained ROP) |
+| SafeStack (LLVM) | ✅ Partial (leak + overwrite template) |
+| CET / Shadow Stack | ✅ Partial (SROP via signal frame) |
+| MTE (ARM64) | ⚠️ Detection + hint (active bypass requires hardware) |
+| Intel CET full (IBT+SS) | ⚠️ Detection only (requires hardware CET support) |
 
 ---
 
