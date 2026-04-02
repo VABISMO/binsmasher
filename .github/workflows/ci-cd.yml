@@ -1,0 +1,61 @@
+name: CI/CD - BinSmasher
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test Suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            python3 python3-pip python3-venv \
+            gcc build-essential \
+            gdb binutils \
+            radare2 \
+            netcat-openbsd \
+            checksec
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create virtual environment and install Python packages
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile test binaries
+        run: |
+          cd tests/src
+          make clean
+          make
+          ls -la ../bins/
+
+      - name: Run full test suite
+        run: |
+          source .venv/bin/activate
+          python3 tests/test_suite.py
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "✅ Pipeline finalizado en ${{ matrix.os }}"
+          echo "Resultado esperado: PASS 60+ | FAIL 0"
