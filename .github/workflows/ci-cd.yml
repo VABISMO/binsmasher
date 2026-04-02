@@ -32,6 +32,7 @@ jobs:
 
       - name: Install radare2 (prebuilt .deb)
         run: |
+          echo "Installing radare2 from prebuilt package"
           R2_VERSION=5.9.0
           wget -q https://github.com/radareorg/radare2/releases/download/${R2_VERSION}/radare2_${R2_VERSION}_amd64.deb
           sudo apt-get install -y ./radare2_${R2_VERSION}_amd64.deb
@@ -64,5 +65,5 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "✅ Pipeline finalizado en ${{ matrix.os }}"
-          echo "Resultado esperado: PASS 60+ | FAIL 0"
+          echo "Pipeline completed on ${{ matrix.os }}"
+          echo "Expected result: PASS 60+ | FAIL 0"
