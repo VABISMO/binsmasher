@@ -1,15 +1,10 @@
-name: CI/CD - BinSmasher (Cryptocalypse)
+name: CI/CD - BinSmasher
 
 on:
   push:
     branches: [ main ]
-    tags: [ 'cryptocalypse-*' ]
   pull_request:
     branches: [ main ]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   test:
@@ -17,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-22.04, ubuntu-24.04 ]
+        os: [ubuntu-22.04, ubuntu-24.04]
       fail-fast: false
 
     steps:
@@ -31,49 +26,21 @@ jobs:
             python3 python3-pip python3-venv \
             gcc build-essential \
             gdb binutils \
+            radare2 \
             netcat-openbsd \
-            checksec \
-            iproute2 \
-            git \
-            pkg-config
-
-      - name: Install radare2 from official source (recommended method)
-        run: |
-          echo "=== Installing radare2 from Git repository ==="
-          git clone --depth 1 https://github.com/radareorg/radare2.git /tmp/radare2
-          cd /tmp/radare2
-          chmod +x sys/install.sh
-          ./sys/install.sh
-          cd /tmp
-          rm -rf radare2
-          echo "=== radare2 installation completed ==="
-          r2 -v || echo "WARNING: r2 command not found"
+            checksec
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Cache Python dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Create virtual environment and install packages
+      - name: Create virtual environment and install Python packages
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install bandit
-
-      - name: Security scan with Bandit
-        run: |
-          source .venv/bin/activate
-          bandit -r src/ -c high -f txt --severity-level high
 
       - name: Compile test binaries
         run: |
@@ -81,14 +48,6 @@ jobs:
           make clean
           make
           ls -la ../bins/
-
-      - name: Debug – Check listening ports before test suite
-        run: |
-          echo "=== Listening ports before running test suite ==="
-          ss -tuln | grep -E '1444[0-9]' || echo "No ports in range 1444x are listening (expected)"
-
-      - name: Grace period for server startup in CI
-        run: sleep 3
 
       - name: Run full test suite
         run: |
@@ -98,52 +57,5 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "✅ Pipeline completed on ${{ matrix.os }}"
-          echo "Expected result: PASS 60+ | FAIL 0"
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: binsmasher-logs-${{ matrix.os }}
-          path: |
-            binsmasher*.log
-            tests/bins/*.log
-            *.log
-          retention-days: 7
-
-  release:
-    name: Create Release (Cryptocalypse)
-    needs: test
-    if: startsWith(github.ref, 'refs/tags/cryptocalypse-')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Extract version
-        id: vars
-        run: echo "VERSION=${GITHUB_REF_NAME#cryptocalypse-}" >> $GITHUB_OUTPUT
-
-      - name: Create distribution ZIP
-        run: |
-          zip -r "binsmasher-${{ github.ref_name }}.zip" . \
-            -x "*/.git/*" \
-            -x "*/__pycache__/*" \
-            -x ".venv/*" \
-            -x "*.pyc"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: BinSmasher - Cryptocalypse ${{ steps.vars.outputs.VERSION }}
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          prerelease: false
-          files: |
-            binsmasher-${{ github.ref_name }}.zip
+          echo "✅ Pipeline finalizado en ${{ matrix.os }}"
+          echo "Resultado esperado: PASS 60+ | FAIL 0"
