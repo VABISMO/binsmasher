@@ -1,0 +1,44 @@
+# BINSMASHER LICENSE v1.0
+
+**Copyright (c) 2026 VABISMO. All Rights Reserved.**
+
+### 1. PURPOSE AND ACCEPTANCE
+This License governs the use of the "BinSmasher" software (the "Software"). By downloading, installing, or using the Software, You agree to be bound by these terms. If You do not agree, You have no right to use the Software.
+
+### 2. GRANT OF LIMITED USE LICENSE
+The Licensor (VABISMO) grants You a personal, non-exclusive, non-transferable, and royalty-free license to use the Software strictly for:
+* **Personal and Educational use.**
+* **Non-profit academic research.**
+* **Individual participation in CTF (Capture The Flag) competitions.**
+* **Self-security auditing of your own code/infrastructure.**
+
+### 3. STRICT PROHIBITION OF COMMERCIAL USE
+The Software may NOT be used for any "Commercial Purpose" without a separate, written Commercial Agreement signed by VABISMO. Prohibited commercial uses include, but are not limited to:
+* **Resale:** Selling, leasing, or licensing the Software or any part of it.
+* **Paid Consulting:** Using the Software to perform security audits, penetration tests, or any professional service for which You receive compensation.
+* **SaaS (Software as a Service):** Hosting the Software on a server to provide its functionality to third parties via a web interface or API.
+* **Bundling:** Including the Software in any commercial toolkit, OS distribution, or hardware device.
+
+### 4. RESTRICTIONS ON MODIFICATION AND REDISTRIBUTION
+To protect the integrity of the tool and the author's reputation:
+* **No Derivative Works:** You may modify the code for your own internal/private use, but You are STRICTLY PROHIBITED from distributing, publishing, or sharing modified versions of the Software ("Derivatives") without express written consent.
+* **No Mirroring/Cloning for Distribution:** You may not host copies of this Software on other public repositories or websites. All users must be directed to the original repository (https://github.com/VABISMO/binsmasher).
+* **Anti-Plagiarism:** You may not extract core modules (e.g., the exploitation engine, bypass logic) to use them in other projects, whether they are open or closed source.
+
+### 5. GOVERNMENT AND CORPORATE USE
+Use by government agencies, military entities, or corporations with an annual revenue exceeding $1,000,000 USD requires a mandatory "Enterprise/Government License" inquiry. Contact the Licensor before deployment.
+
+### 6. REVENUE SHARING AND NEGOTIATION
+If You wish to use BinSmasher for any profit-generating activity, You are legally obligated to contact VABISMO (the Licensor) to negotiate:
+1.  A flat-fee commercial license.
+2.  A revenue-sharing agreement (Royalty).
+Any commercial use without such an agreement constitutes **Willful Copyright Infringement** under international law.
+
+### 7. TERMINATION
+This License terminates automatically if You breach any of its terms. Upon termination, You must destroy all copies of the Software in your possession.
+
+### 8. NO WARRANTY AND LIMITATION OF LIABILITY
+THE SOFTWARE IS PROVIDED "AS IS". VABISMO DISCLAIMS ALL WARRANTIES. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY LEGAL CONSEQUENCES, SYSTEM DAMAGE, OR DATA LOSS ARISING FROM THE USE OR MISUSE OF THIS TOOL. YOU ASSUME ALL RISK.
+
+### 9. GOVERNING LAW
+Any legal dispute arising from this license shall be governed by the laws of the Licensor's jurisdiction (Spain), and international copyright treaties (Berne Convention).
