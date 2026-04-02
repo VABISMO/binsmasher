@@ -26,9 +26,16 @@ jobs:
             python3 python3-pip python3-venv \
             gcc build-essential \
             gdb binutils \
-            radare2 \
             netcat-openbsd \
-            checksec
+            checksec \
+            wget
+
+      - name: Install radare2 (prebuilt .deb)
+        run: |
+          R2_VERSION=5.9.0
+          wget -q https://github.com/radareorg/radare2/releases/download/${R2_VERSION}/radare2_${R2_VERSION}_amd64.deb
+          sudo apt-get install -y ./radare2_${R2_VERSION}_amd64.deb
+          r2 -v
 
       - name: Setup Python
         uses: actions/setup-python@v5
