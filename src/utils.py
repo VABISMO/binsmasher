@@ -7,7 +7,7 @@ Centralized logging, config dataclass, Rich helpers.
 import logging
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 from argparse import HelpFormatter
 
@@ -18,10 +18,6 @@ from rich.logging import RichHandler
 
 console = Console()
 
-
-# ──────────────────────────────────────────────
-# Logging
-# ──────────────────────────────────────────────
 
 def setup_logging(log_file: str) -> logging.Logger:
     logger = logging.getLogger("binsmasher")
@@ -39,10 +35,6 @@ def setup_logging(log_file: str) -> logging.Logger:
 
     return logger
 
-
-# ──────────────────────────────────────────────
-# Config dataclass
-# ──────────────────────────────────────────────
 
 @dataclass
 class ExploitConfig:
@@ -73,9 +65,9 @@ class ExploitConfig:
     solana_rpc: str = "http://localhost:8899"
     bpf_fuzz: bool = False
     agave_exploit_type: Optional[str] = None
-    # Extra attrs populated by main
     afl_timeout: int = 60
     mutation_fuzz: bool = False
+    cfi_bypass: bool = False
 
     def validate(self) -> None:
         if not os.path.isfile(self.binary):
@@ -96,22 +88,13 @@ class ExploitConfig:
 
     @property
     def binary_args_list(self) -> list:
-        """Never raises AttributeError — always returns a list."""
         return self.binary_args.split() if self.binary_args else []
 
-
-# ──────────────────────────────────────────────
-# Rich argparse formatter
-# ──────────────────────────────────────────────
 
 class RichHelpFormatter(HelpFormatter):
     def __init__(self, prog):
         super().__init__(prog, max_help_position=40, width=100)
 
-
-# ──────────────────────────────────────────────
-# Summary table
-# ──────────────────────────────────────────────
 
 def print_summary(
     offset, stack_addr, return_addr,
@@ -123,15 +106,15 @@ def print_summary(
         title="[bold cyan]BinSmasher — Exploitation Summary[/]",
         show_header=True, header_style="bold cyan",
     )
-    table.add_column("Property",  style="cyan",  min_width=22)
-    table.add_column("Value",     style="white")
+    table.add_column("Property", style="cyan", min_width=22)
+    table.add_column("Value", style="white")
 
-    table.add_row("Offset",          str(offset) if offset is not None else "N/A")
-    table.add_row("Stack Address",   hex(stack_addr)  if stack_addr  else "N/A")
-    table.add_row("Return Address",  hex(return_addr) if return_addr else "N/A")
-    table.add_row("Canary",          hex(canary)      if canary      else "N/A")
-    table.add_row("Exploit Type",    exploit_type or "N/A")
-    table.add_row("Target Function", target_function  or "N/A")
+    table.add_row("Offset", str(offset) if offset is not None else "N/A")
+    table.add_row("Stack Address", hex(stack_addr) if stack_addr else "N/A")
+    table.add_row("Return Address", hex(return_addr) if return_addr else "N/A")
+    table.add_row("Canary", hex(canary) if canary else "N/A")
+    table.add_row("Exploit Type", exploit_type or "N/A")
+    table.add_row("Target Function", target_function or "N/A")
     table.add_row(
         "Status",
         f"[green]{status}[/]" if status == "Success" else f"[red]{status}[/]",
