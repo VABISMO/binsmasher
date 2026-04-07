@@ -97,8 +97,8 @@ boofuzz  >= 0.4.2     — Structured network fuzzing
 ### 1. Unzip
 
 ```bash
-unzip binsmasher_v7.zip
-cd v7
+unzip binsmasher.zip
+cd binsmasher
 ```
 
 ### 2. System dependencies
