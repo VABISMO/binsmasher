@@ -675,3 +675,11 @@ ETH — `0xD773B73C7ea4862020b7B5B58f31Ea491f5a9bA3`
 BTC — `bc1ql6qvsk67hl5vz346kx4gueqjhp6me9ss8eflgt`
 
 SOL — `GYBiTvVbPvPJP7ZK5oaqc9w6UtHvd6NkhSPP2UBhDvfh`
+
+## Authors 
+
+V.Nos - Cryptocalypse
+
+A.Canto - InsecureWorld
+
+BinSmasher Team
