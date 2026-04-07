@@ -1,6 +1,6 @@
 # BinSmasher 🔨
 
-**Ultimate Cross-Platform Binary Exploitation Framework**
+**Ultimate Cross-Platform Binary Exploitation Framework** (WIP)
 
 <img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/66969605-fcae-48b9-9096-350778bdab99" />
 
