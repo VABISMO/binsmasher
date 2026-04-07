@@ -1,0 +1,910 @@
+[
+  {
+    "dataType": "CVE_RECORD",
+    "dataVersion": "5.0",
+    "cveMetadata": {
+      "cveId": "CVE-PENDING-AUDIT-0001",
+      "assignerOrgId": "YOUR-ORG-UUID",
+      "assignerShortName": "YourOrg",
+      "state": "PUBLISHED",
+      "dateReserved": "2026-04-05T22:07:27.905488+00:00",
+      "datePublished": "2026-04-05T22:07:27.905488+00:00",
+      "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+    },
+    "containers": {
+      "cna": {
+        "providerMetadata": {
+          "orgId": "YOUR-ORG-UUID",
+          "shortName": "YourOrg",
+          "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+        },
+        "title": "BufferOverflow in vuln_test via gets()",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Unbounded stack buffer overflow via gets(). Found in binary 'vuln_test' (SHA-256: 10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956) at address 0x401252. Binary protections: NX=False, PIE=False, Canary=False, RELRO=None."
+          }
+        ],
+        "affected": [
+          {
+            "vendor": "UNKNOWN \u2014 to be identified",
+            "product": "vuln_test",
+            "versions": [
+              {
+                "version": "unknown",
+                "status": "affected",
+                "versionType": "custom"
+              }
+            ],
+            "defaultStatus": "affected"
+          }
+        ],
+        "problemTypes": [
+          {
+            "descriptions": [
+              {
+                "type": "CWE",
+                "cweId": "CWE-120",
+                "lang": "en",
+                "description": "Unbounded stack buffer overflow via gets()"
+              }
+            ]
+          }
+        ],
+        "metrics": [
+          {
+            "format": "CVSS",
+            "scenarios": [
+              {
+                "lang": "en",
+                "value": "GENERAL"
+              }
+            ],
+            "cvssV3_1": {
+              "version": "3.1",
+              "baseScore": 9.5,
+              "baseSeverity": "CRITICAL",
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "attackVector": "NETWORK",
+              "attackComplexity": "LOW",
+              "privilegesRequired": "NONE",
+              "userInteraction": "NONE",
+              "scope": "UNCHANGED",
+              "confidentialityImpact": "HIGH",
+              "integrityImpact": "HIGH",
+              "availabilityImpact": "HIGH"
+            }
+          }
+        ],
+        "references": [
+          {
+            "url": "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-PENDING",
+            "name": "MITRE CVE Pending",
+            "tags": [
+              "vendor-advisory"
+            ]
+          },
+          {
+            "url": "https://cwe.mitre.org/data/definitions/120.html",
+            "name": "CWE-120 Reference",
+            "tags": [
+              "technical-description"
+            ]
+          }
+        ],
+        "timeline": [
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "Vulnerability discovered via automated static analysis"
+          },
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "CVE reserved / pending assignment"
+          }
+        ],
+        "solutions": [
+          {
+            "lang": "en",
+            "value": "Replace gets() with fgets(buf, sizeof(buf), stdin). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now)."
+          }
+        ],
+        "workarounds": [
+          {
+            "lang": "en",
+            "value": "Apply compiler hardening flags and restrict binary permissions."
+          }
+        ],
+        "credits": [
+          {
+            "lang": "en",
+            "value": "Discovered using BinSmasher CVE Auditor (static analysis)",
+            "type": "finder"
+          }
+        ],
+        "source": {
+          "discovery": "INTERNAL",
+          "tool": "BinSmasher CVE Auditor v3",
+          "binaryHash": "10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956",
+          "auditId": "AUDIT-0001",
+          "taintConfidence": "CONFIRMED",
+          "callSites": [
+            "0x401252"
+          ],
+          "evidence": [
+            "Imported symbol: gets",
+            "Call sites: 0x401252",
+            "Disasm context: 401252:\te8 79 fe ff ff       \tcall   4010d0 <gets@plt>",
+            "Disasm context: 401257:\t90                   \tnop",
+            "Disasm context: 401258:\tc9                   \tleave",
+            "Disasm context: 401259:\tc3                   \tret",
+            "Disasm context: 000000000040125a <main>:",
+            "Disasm context: 40125a:\tf3 0f 1e fa          \tendbr64",
+            "Disasm context: 40125e:\t55",
+            "[Taint] Call path: gets",
+            "[Taint] Register analysis: Could not determine arg source \u2014 conservative PROBABLE",
+            "[Taint] Direct taint path found and register args appear user-controlled"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dataType": "CVE_RECORD",
+    "dataVersion": "5.0",
+    "cveMetadata": {
+      "cveId": "CVE-PENDING-AUDIT-0002",
+      "assignerOrgId": "YOUR-ORG-UUID",
+      "assignerShortName": "YourOrg",
+      "state": "PUBLISHED",
+      "dateReserved": "2026-04-05T22:07:27.905488+00:00",
+      "datePublished": "2026-04-05T22:07:27.905488+00:00",
+      "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+    },
+    "containers": {
+      "cna": {
+        "providerMetadata": {
+          "orgId": "YOUR-ORG-UUID",
+          "shortName": "YourOrg",
+          "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+        },
+        "title": "FormatString in vuln_test via printf()",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Uncontrolled format string \u2014 memory read/write primitive. Found in binary 'vuln_test' (SHA-256: 10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956) at address 0x401205. Binary protections: NX=False, PIE=False, Canary=False, RELRO=None."
+          }
+        ],
+        "affected": [
+          {
+            "vendor": "UNKNOWN \u2014 to be identified",
+            "product": "vuln_test",
+            "versions": [
+              {
+                "version": "unknown",
+                "status": "affected",
+                "versionType": "custom"
+              }
+            ],
+            "defaultStatus": "affected"
+          }
+        ],
+        "problemTypes": [
+          {
+            "descriptions": [
+              {
+                "type": "CWE",
+                "cweId": "CWE-134",
+                "lang": "en",
+                "description": "Uncontrolled format string \u2014 memory read/write primitive"
+              }
+            ]
+          }
+        ],
+        "metrics": [
+          {
+            "format": "CVSS",
+            "scenarios": [
+              {
+                "lang": "en",
+                "value": "GENERAL"
+              }
+            ],
+            "cvssV3_1": {
+              "version": "3.1",
+              "baseScore": 9.5,
+              "baseSeverity": "CRITICAL",
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "attackVector": "NETWORK",
+              "attackComplexity": "LOW",
+              "privilegesRequired": "NONE",
+              "userInteraction": "NONE",
+              "scope": "UNCHANGED",
+              "confidentialityImpact": "HIGH",
+              "integrityImpact": "HIGH",
+              "availabilityImpact": "HIGH"
+            }
+          }
+        ],
+        "references": [
+          {
+            "url": "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-PENDING",
+            "name": "MITRE CVE Pending",
+            "tags": [
+              "vendor-advisory"
+            ]
+          },
+          {
+            "url": "https://cwe.mitre.org/data/definitions/134.html",
+            "name": "CWE-134 Reference",
+            "tags": [
+              "technical-description"
+            ]
+          }
+        ],
+        "timeline": [
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "Vulnerability discovered via automated static analysis"
+          },
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "CVE reserved / pending assignment"
+          }
+        ],
+        "solutions": [
+          {
+            "lang": "en",
+            "value": "Always pass a literal format string: printf(\"%s\", user_input). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now)."
+          }
+        ],
+        "workarounds": [
+          {
+            "lang": "en",
+            "value": "Apply compiler hardening flags and restrict binary permissions."
+          }
+        ],
+        "credits": [
+          {
+            "lang": "en",
+            "value": "Discovered using BinSmasher CVE Auditor (static analysis)",
+            "type": "finder"
+          }
+        ],
+        "source": {
+          "discovery": "INTERNAL",
+          "tool": "BinSmasher CVE Auditor v3",
+          "binaryHash": "10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956",
+          "auditId": "AUDIT-0002",
+          "taintConfidence": "CONFIRMED",
+          "callSites": [
+            "0x401205"
+          ],
+          "evidence": [
+            "Imported symbol: printf",
+            "Call sites: 0x401205",
+            "Disasm context: 401205:\te8 b6 fe ff ff       \tcall   4010c0 <printf@plt>",
+            "Disasm context: 40120a:\t90                   \tnop",
+            "Disasm context: 40120b:\tc9                   \tleave",
+            "Disasm context: 40120c:\tc3                   \tret",
+            "Disasm context: 000000000040120d <network_recv>:",
+            "Disasm context: 40120d:\tf3 0f 1e fa          \tendbr64",
+            "Disasm context: 401211:\t55",
+            "[Taint] Call path: main \u2192 vulnerable_copy \u2192 printf",
+            "[Taint] Register analysis: Could not determine arg source \u2014 conservative PROBABLE",
+            "[Taint] Direct taint path found and register args appear user-controlled"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dataType": "CVE_RECORD",
+    "dataVersion": "5.0",
+    "cveMetadata": {
+      "cveId": "CVE-PENDING-AUDIT-0003",
+      "assignerOrgId": "YOUR-ORG-UUID",
+      "assignerShortName": "YourOrg",
+      "state": "PUBLISHED",
+      "dateReserved": "2026-04-05T22:07:27.905488+00:00",
+      "datePublished": "2026-04-05T22:07:27.905488+00:00",
+      "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+    },
+    "containers": {
+      "cna": {
+        "providerMetadata": {
+          "orgId": "YOUR-ORG-UUID",
+          "shortName": "YourOrg",
+          "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+        },
+        "title": "BufferOverflow in vuln_test via recv()",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Network recv() without size validation \u2014 heap overflow. Found in binary 'vuln_test' (SHA-256: 10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956) at address 0x40123e. Binary protections: NX=False, PIE=False, Canary=False, RELRO=None."
+          }
+        ],
+        "affected": [
+          {
+            "vendor": "UNKNOWN \u2014 to be identified",
+            "product": "vuln_test",
+            "versions": [
+              {
+                "version": "unknown",
+                "status": "affected",
+                "versionType": "custom"
+              }
+            ],
+            "defaultStatus": "affected"
+          }
+        ],
+        "problemTypes": [
+          {
+            "descriptions": [
+              {
+                "type": "CWE",
+                "cweId": "CWE-122",
+                "lang": "en",
+                "description": "Network recv() without size validation \u2014 heap overflow"
+              }
+            ]
+          }
+        ],
+        "metrics": [
+          {
+            "format": "CVSS",
+            "scenarios": [
+              {
+                "lang": "en",
+                "value": "GENERAL"
+              }
+            ],
+            "cvssV3_1": {
+              "version": "3.1",
+              "baseScore": 8.8,
+              "baseSeverity": "HIGH",
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "attackVector": "NETWORK",
+              "attackComplexity": "LOW",
+              "privilegesRequired": "NONE",
+              "userInteraction": "NONE",
+              "scope": "UNCHANGED",
+              "confidentialityImpact": "HIGH",
+              "integrityImpact": "HIGH",
+              "availabilityImpact": "HIGH"
+            }
+          }
+        ],
+        "references": [
+          {
+            "url": "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-PENDING",
+            "name": "MITRE CVE Pending",
+            "tags": [
+              "vendor-advisory"
+            ]
+          },
+          {
+            "url": "https://cwe.mitre.org/data/definitions/122.html",
+            "name": "CWE-122 Reference",
+            "tags": [
+              "technical-description"
+            ]
+          }
+        ],
+        "timeline": [
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "Vulnerability discovered via automated static analysis"
+          },
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "CVE reserved / pending assignment"
+          }
+        ],
+        "solutions": [
+          {
+            "lang": "en",
+            "value": "Always pass sizeof(buf) as the length argument to recv(). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now)."
+          }
+        ],
+        "workarounds": [
+          {
+            "lang": "en",
+            "value": "Apply compiler hardening flags and restrict binary permissions."
+          }
+        ],
+        "credits": [
+          {
+            "lang": "en",
+            "value": "Discovered using BinSmasher CVE Auditor (static analysis)",
+            "type": "finder"
+          }
+        ],
+        "source": {
+          "discovery": "INTERNAL",
+          "tool": "BinSmasher CVE Auditor v3",
+          "binaryHash": "10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956",
+          "auditId": "AUDIT-0003",
+          "taintConfidence": "CONFIRMED",
+          "callSites": [
+            "0x40123e"
+          ],
+          "evidence": [
+            "Imported symbol: recv",
+            "Call sites: 0x40123e",
+            "Disasm context: 401232:\tba 00 04 00 00       \tmov    $0x400,%edx",
+            "Disasm context: 401237:\t89 c7                \tmov    %eax,%edi",
+            "Disasm context: 401239:\tb8 00 00 00 00       \tmov    $0x0,%eax",
+            "Disasm context: 40123e:\te8 4d fe ff ff       \tcall   401090 <recv@plt>",
+            "Disasm context: 401243:\t48 8d 85 70 ff ff ff \tlea    -0x90(%rbp),%rax",
+            "Disasm context: 40124a:\t48 89 c7             \tmov    %rax,%rdi",
+            "Disasm context: 40124d:\tb8 00 00 00 00       \tmov    $0x0,%eax",
+            "Disasm context: 401252:\te8 79 fe ff ff       \tcall   4010d0",
+            "[Taint] Call path: recv",
+            "[Taint] Register analysis: Could not determine arg source \u2014 conservative PROBABLE",
+            "[Taint] Direct taint path found and register args appear user-controlled"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dataType": "CVE_RECORD",
+    "dataVersion": "5.0",
+    "cveMetadata": {
+      "cveId": "CVE-PENDING-AUDIT-0004",
+      "assignerOrgId": "YOUR-ORG-UUID",
+      "assignerShortName": "YourOrg",
+      "state": "PUBLISHED",
+      "dateReserved": "2026-04-05T22:07:27.905488+00:00",
+      "datePublished": "2026-04-05T22:07:27.905488+00:00",
+      "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+    },
+    "containers": {
+      "cna": {
+        "providerMetadata": {
+          "orgId": "YOUR-ORG-UUID",
+          "shortName": "YourOrg",
+          "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+        },
+        "title": "BufferOverflow in vuln_test via sprintf()",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Unchecked sprintf \u2014 format/buffer overflow. Found in binary 'vuln_test' (SHA-256: 10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956) at address 0x40129f. Binary protections: NX=False, PIE=False, Canary=False, RELRO=None."
+          }
+        ],
+        "affected": [
+          {
+            "vendor": "UNKNOWN \u2014 to be identified",
+            "product": "vuln_test",
+            "versions": [
+              {
+                "version": "unknown",
+                "status": "affected",
+                "versionType": "custom"
+              }
+            ],
+            "defaultStatus": "affected"
+          }
+        ],
+        "problemTypes": [
+          {
+            "descriptions": [
+              {
+                "type": "CWE",
+                "cweId": "CWE-134",
+                "lang": "en",
+                "description": "Unchecked sprintf \u2014 format/buffer overflow"
+              }
+            ]
+          }
+        ],
+        "metrics": [
+          {
+            "format": "CVSS",
+            "scenarios": [
+              {
+                "lang": "en",
+                "value": "GENERAL"
+              }
+            ],
+            "cvssV3_1": {
+              "version": "3.1",
+              "baseScore": 7.2,
+              "baseSeverity": "HIGH",
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "attackVector": "NETWORK",
+              "attackComplexity": "LOW",
+              "privilegesRequired": "NONE",
+              "userInteraction": "NONE",
+              "scope": "UNCHANGED",
+              "confidentialityImpact": "HIGH",
+              "integrityImpact": "HIGH",
+              "availabilityImpact": "HIGH"
+            }
+          }
+        ],
+        "references": [
+          {
+            "url": "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-PENDING",
+            "name": "MITRE CVE Pending",
+            "tags": [
+              "vendor-advisory"
+            ]
+          },
+          {
+            "url": "https://cwe.mitre.org/data/definitions/134.html",
+            "name": "CWE-134 Reference",
+            "tags": [
+              "technical-description"
+            ]
+          }
+        ],
+        "timeline": [
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "Vulnerability discovered via automated static analysis"
+          },
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "CVE reserved / pending assignment"
+          }
+        ],
+        "solutions": [
+          {
+            "lang": "en",
+            "value": "Replace sprintf() with snprintf() with explicit size. Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now)."
+          }
+        ],
+        "workarounds": [
+          {
+            "lang": "en",
+            "value": "Apply compiler hardening flags and restrict binary permissions."
+          }
+        ],
+        "credits": [
+          {
+            "lang": "en",
+            "value": "Discovered using BinSmasher CVE Auditor (static analysis)",
+            "type": "finder"
+          }
+        ],
+        "source": {
+          "discovery": "INTERNAL",
+          "tool": "BinSmasher CVE Auditor v3",
+          "binaryHash": "10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956",
+          "auditId": "AUDIT-0004",
+          "taintConfidence": "CONFIRMED",
+          "callSites": [
+            "0x40129f"
+          ],
+          "evidence": [
+            "Imported symbol: sprintf",
+            "Call sites: 0x40129f",
+            "Disasm context: 401294:\t48 89 d6             \tmov    %rdx,%rsi",
+            "Disasm context: 401297:\t48 89 c7             \tmov    %rax,%rdi",
+            "Disasm context: 40129a:\tb8 00 00 00 00       \tmov    $0x0,%eax",
+            "Disasm context: 40129f:\te8 3c fe ff ff       \tcall   4010e0 <sprintf@plt>",
+            "Disasm context: 4012a4:\t48 8b 85 f0 fe ff ff \tmov    -0x110(%rbp),%rax",
+            "Disasm context: 4012ab:\t48 83 c0 08          \tadd    $0x8,%rax",
+            "Disasm context: 4012af:\t48 8b 00             \tmov    (%rax),%rax",
+            "Disasm context: 4012b2:\t48 89 c7             \tmov    %ra",
+            "[Taint] Call path: main \u2192 sprintf",
+            "[Taint] Register analysis: Could not determine arg source \u2014 conservative PROBABLE",
+            "[Taint] Direct taint path found and register args appear user-controlled"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dataType": "CVE_RECORD",
+    "dataVersion": "5.0",
+    "cveMetadata": {
+      "cveId": "CVE-PENDING-AUDIT-0005",
+      "assignerOrgId": "YOUR-ORG-UUID",
+      "assignerShortName": "YourOrg",
+      "state": "PUBLISHED",
+      "dateReserved": "2026-04-05T22:07:27.905488+00:00",
+      "datePublished": "2026-04-05T22:07:27.905488+00:00",
+      "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+    },
+    "containers": {
+      "cna": {
+        "providerMetadata": {
+          "orgId": "YOUR-ORG-UUID",
+          "shortName": "YourOrg",
+          "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+        },
+        "title": "BufferOverflow in vuln_test via strcpy()",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Unchecked string copy \u2014 potential stack overflow. Found in binary 'vuln_test' (SHA-256: 10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956) at address 0x4011f4. Binary protections: NX=False, PIE=False, Canary=False, RELRO=None."
+          }
+        ],
+        "affected": [
+          {
+            "vendor": "UNKNOWN \u2014 to be identified",
+            "product": "vuln_test",
+            "versions": [
+              {
+                "version": "unknown",
+                "status": "affected",
+                "versionType": "custom"
+              }
+            ],
+            "defaultStatus": "affected"
+          }
+        ],
+        "problemTypes": [
+          {
+            "descriptions": [
+              {
+                "type": "CWE",
+                "cweId": "CWE-120",
+                "lang": "en",
+                "description": "Unchecked string copy \u2014 potential stack overflow"
+              }
+            ]
+          }
+        ],
+        "metrics": [
+          {
+            "format": "CVSS",
+            "scenarios": [
+              {
+                "lang": "en",
+                "value": "GENERAL"
+              }
+            ],
+            "cvssV3_1": {
+              "version": "3.1",
+              "baseScore": 7.8,
+              "baseSeverity": "HIGH",
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "attackVector": "NETWORK",
+              "attackComplexity": "LOW",
+              "privilegesRequired": "NONE",
+              "userInteraction": "NONE",
+              "scope": "UNCHANGED",
+              "confidentialityImpact": "HIGH",
+              "integrityImpact": "HIGH",
+              "availabilityImpact": "HIGH"
+            }
+          }
+        ],
+        "references": [
+          {
+            "url": "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-PENDING",
+            "name": "MITRE CVE Pending",
+            "tags": [
+              "vendor-advisory"
+            ]
+          },
+          {
+            "url": "https://cwe.mitre.org/data/definitions/120.html",
+            "name": "CWE-120 Reference",
+            "tags": [
+              "technical-description"
+            ]
+          }
+        ],
+        "timeline": [
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "Vulnerability discovered via automated static analysis"
+          },
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "CVE reserved / pending assignment"
+          }
+        ],
+        "solutions": [
+          {
+            "lang": "en",
+            "value": "Replace strcpy() with strlcpy() or snprintf(). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now)."
+          }
+        ],
+        "workarounds": [
+          {
+            "lang": "en",
+            "value": "Apply compiler hardening flags and restrict binary permissions."
+          }
+        ],
+        "credits": [
+          {
+            "lang": "en",
+            "value": "Discovered using BinSmasher CVE Auditor (static analysis)",
+            "type": "finder"
+          }
+        ],
+        "source": {
+          "discovery": "INTERNAL",
+          "tool": "BinSmasher CVE Auditor v3",
+          "binaryHash": "10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956",
+          "auditId": "AUDIT-0005",
+          "taintConfidence": "CONFIRMED",
+          "callSites": [
+            "0x4011f4"
+          ],
+          "evidence": [
+            "Imported symbol: strcpy",
+            "Call sites: 0x4011f4",
+            "Disasm context: 4011ea:\t48 8d 45 c0          \tlea    -0x40(%rbp),%rax",
+            "Disasm context: 4011ee:\t48 89 d6             \tmov    %rdx,%rsi",
+            "Disasm context: 4011f1:\t48 89 c7             \tmov    %rax,%rdi",
+            "Disasm context: 4011f4:\te8 a7 fe ff ff       \tcall   4010a0 <strcpy@plt>",
+            "Disasm context: 4011f9:\t48 8d 45 c0          \tlea    -0x40(%rbp),%rax",
+            "Disasm context: 4011fd:\t48 89 c7             \tmov    %rax,%rdi",
+            "Disasm context: 401200:\tb8 00 00 00 00       \tmov    $0x0,%eax",
+            "Disasm context: 401205:\te8 b6 fe ff ff       \tcall   4010c0",
+            "[Taint] Call path: main \u2192 vulnerable_copy \u2192 strcpy",
+            "[Taint] Register analysis: Could not determine arg source \u2014 conservative PROBABLE",
+            "[Taint] Direct taint path found and register args appear user-controlled"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dataType": "CVE_RECORD",
+    "dataVersion": "5.0",
+    "cveMetadata": {
+      "cveId": "CVE-PENDING-AUDIT-0006",
+      "assignerOrgId": "YOUR-ORG-UUID",
+      "assignerShortName": "YourOrg",
+      "state": "PUBLISHED",
+      "dateReserved": "2026-04-05T22:07:27.905488+00:00",
+      "datePublished": "2026-04-05T22:07:27.905488+00:00",
+      "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+    },
+    "containers": {
+      "cna": {
+        "providerMetadata": {
+          "orgId": "YOUR-ORG-UUID",
+          "shortName": "YourOrg",
+          "dateUpdated": "2026-04-05T22:07:27.905488+00:00"
+        },
+        "title": "CommandInjection in vuln_test via system()",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "system() call \u2014 OS command injection if input reaches it. Found in binary 'vuln_test' (SHA-256: 10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956) at address 0x4012c4. Binary protections: NX=False, PIE=False, Canary=False, RELRO=None."
+          }
+        ],
+        "affected": [
+          {
+            "vendor": "UNKNOWN \u2014 to be identified",
+            "product": "vuln_test",
+            "versions": [
+              {
+                "version": "unknown",
+                "status": "affected",
+                "versionType": "custom"
+              }
+            ],
+            "defaultStatus": "affected"
+          }
+        ],
+        "problemTypes": [
+          {
+            "descriptions": [
+              {
+                "type": "CWE",
+                "cweId": "CWE-78",
+                "lang": "en",
+                "description": "system() call \u2014 OS command injection if input reaches it"
+              }
+            ]
+          }
+        ],
+        "metrics": [
+          {
+            "format": "CVSS",
+            "scenarios": [
+              {
+                "lang": "en",
+                "value": "GENERAL"
+              }
+            ],
+            "cvssV3_1": {
+              "version": "3.1",
+              "baseScore": 9.5,
+              "baseSeverity": "CRITICAL",
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "attackVector": "NETWORK",
+              "attackComplexity": "LOW",
+              "privilegesRequired": "NONE",
+              "userInteraction": "NONE",
+              "scope": "UNCHANGED",
+              "confidentialityImpact": "HIGH",
+              "integrityImpact": "HIGH",
+              "availabilityImpact": "HIGH"
+            }
+          }
+        ],
+        "references": [
+          {
+            "url": "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-PENDING",
+            "name": "MITRE CVE Pending",
+            "tags": [
+              "vendor-advisory"
+            ]
+          },
+          {
+            "url": "https://cwe.mitre.org/data/definitions/78.html",
+            "name": "CWE-78 Reference",
+            "tags": [
+              "technical-description"
+            ]
+          }
+        ],
+        "timeline": [
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "Vulnerability discovered via automated static analysis"
+          },
+          {
+            "time": "2026-04-05T22:07:27.905488+00:00",
+            "lang": "en",
+            "value": "CVE reserved / pending assignment"
+          }
+        ],
+        "solutions": [
+          {
+            "lang": "en",
+            "value": "Avoid system(). Use execve() with a fixed path and validated args. Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now)."
+          }
+        ],
+        "workarounds": [
+          {
+            "lang": "en",
+            "value": "Apply compiler hardening flags and restrict binary permissions."
+          }
+        ],
+        "credits": [
+          {
+            "lang": "en",
+            "value": "Discovered using BinSmasher CVE Auditor (static analysis)",
+            "type": "finder"
+          }
+        ],
+        "source": {
+          "discovery": "INTERNAL",
+          "tool": "BinSmasher CVE Auditor v3",
+          "binaryHash": "10f89596e176b163f0d7bc8c9596d5d4bd90363788bdea46730776e854199956",
+          "auditId": "AUDIT-0006",
+          "taintConfidence": "CONFIRMED",
+          "callSites": [
+            "0x4012c4"
+          ],
+          "evidence": [
+            "Imported symbol: system",
+            "Call sites: 0x4012c4",
+            "Disasm context: 4012c9:\tb8 00 00 00 00       \tmov    $0x0,%eax",
+            "Disasm context: 4012ce:\tc9                   \tleave",
+            "Disasm context: 4012cf:\tc3                   \tret",
+            "Disasm context: Disassembly of section .fini:",
+            "Disasm context: 00000000004012d0 <_fini>:",
+            "Disasm context: 4012d0:\tf3 0f 1e",
+            "[Taint] Call path: main \u2192 system",
+            "[Taint] Register analysis: Could not determine arg source \u2014 conservative PROBABLE",
+            "[Taint] Direct taint path found and register args appear user-controlled"
+          ]
+        }
+      }
+    }
+  }
+]

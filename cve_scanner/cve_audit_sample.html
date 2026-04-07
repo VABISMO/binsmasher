@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BinSmasher CVE Audit Report — 2026-04-05 22:07:27 UTC</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & base ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;
+  --bg2:#111118;
+  --bg3:#18181f;
+  --border:#2a2a3a;
+  --text:#e8e8f0;
+  --dim:#888;
+  --red:#ff2d55;
+  --orange:#ff9f0a;
+  --yellow:#ffd60a;
+  --green:#30d158;
+  --blue:#0a84ff;
+  --purple:#bf5af2;
+  --font-mono:'JetBrains Mono',monospace;
+  --font-ui:'Syne',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:14px;line-height:1.5;min-height:100vh}
+
+/* ── Header ── */
+.header{
+  background:linear-gradient(135deg,#0a0a0f 0%,#13001f 50%,#000d1f 100%);
+  border-bottom:1px solid var(--border);
+  padding:2rem 2.5rem;
+  position:relative;
+  overflow:hidden;
+}
+.header::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 60% 80% at 70% 50%,rgba(191,90,242,.12),transparent);
+  pointer-events:none;
+}
+.header-grid{display:flex;align-items:center;gap:2rem;flex-wrap:wrap}
+.logo{
+  font-size:2.4rem;font-weight:800;letter-spacing:-.04em;
+  background:linear-gradient(135deg,var(--red),var(--purple));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.header-info h1{font-size:1.05rem;font-weight:700;color:var(--text);letter-spacing:.05em;text-transform:uppercase}
+.header-info p{color:var(--dim);font-size:.85rem;font-family:var(--font-mono)}
+.stat-pills{display:flex;gap:.6rem;flex-wrap:wrap;margin-left:auto}
+.pill{
+  padding:.35rem .9rem;border-radius:999px;font-size:.8rem;font-weight:700;
+  font-family:var(--font-mono);letter-spacing:.04em;border:1px solid;
+}
+.pill-red{border-color:var(--red);color:var(--red)}
+.pill-orange{border-color:var(--orange);color:var(--orange)}
+.pill-green{border-color:var(--green);color:var(--green)}
+.pill-yellow{border-color:var(--yellow);color:var(--yellow)}
+.pill-blue{border-color:var(--blue);color:var(--blue)}
+
+/* ── Layout ── */
+.main{padding:2rem 2.5rem;max-width:1800px;margin:0 auto}
+
+/* ── Section title ── */
+.section-title{
+  font-size:.7rem;font-weight:700;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--dim);
+  margin-bottom:1rem;padding-bottom:.4rem;
+  border-bottom:1px solid var(--border);
+}
+
+/* ── Cards ── */
+.cards-wrap{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:2.5rem}
+.card{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:12px;padding:1.1rem 1.3rem;min-width:260px;max-width:340px;flex:1;
+  transition:border-color .2s,transform .2s;
+}
+.card:hover{border-color:var(--purple);transform:translateY(-2px)}
+.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:.3rem}
+.card-name{font-weight:700;font-size:1rem;color:var(--text)}
+.card-score{
+  font-family:var(--font-mono);font-size:.8rem;
+  background:linear-gradient(135deg,var(--red),var(--purple));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  font-weight:700;
+}
+.card-sub{color:var(--dim);font-size:.8rem;margin:.1rem 0}
+.card-stats{display:flex;gap:1rem;font-size:.82rem;margin-top:.5rem}
+.card-hash{font-family:var(--font-mono);font-size:.67rem;color:#555;margin-top:.5rem;word-break:break-all}
+.suid-tag,.sgid-tag{
+  font-size:.7rem;font-weight:700;padding:.1rem .4rem;border-radius:4px;
+  background:rgba(255,45,85,.2);color:var(--red);
+}
+
+/* ── Controls bar ── */
+.controls{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:1rem 1.3rem;margin-bottom:1.5rem;
+  display:flex;gap:.8rem;flex-wrap:wrap;align-items:center;
+}
+.search-box{
+  background:var(--bg3);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);padding:.5rem .9rem;font-family:var(--font-mono);
+  font-size:.85rem;outline:none;flex:1;min-width:200px;
+}
+.search-box:focus{border-color:var(--purple)}
+.filter-sel{
+  background:var(--bg3);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);padding:.5rem .9rem;font-size:.85rem;cursor:pointer;
+  outline:none;
+}
+.filter-sel:focus{border-color:var(--purple)}
+.btn-reset{
+  background:transparent;border:1px solid var(--border);border-radius:8px;
+  color:var(--dim);padding:.5rem 1rem;font-size:.82rem;cursor:pointer;
+  transition:border-color .2s,color .2s;
+}
+.btn-reset:hover{border-color:var(--purple);color:var(--text)}
+.count-label{
+  font-family:var(--font-mono);font-size:.8rem;color:var(--dim);margin-left:auto;
+}
+
+/* ── Table ── */
+.tbl-wrap{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:12px;overflow:hidden;
+}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+thead tr{background:var(--bg3);border-bottom:2px solid var(--border)}
+th{
+  padding:.75rem 1rem;text-align:left;font-size:.68rem;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+  font-weight:700;cursor:pointer;user-select:none;white-space:nowrap;
+}
+th:hover{color:var(--text)}
+th .sort-arrow{opacity:.35;margin-left:.3rem}
+tbody tr{border-bottom:1px solid var(--border);transition:background .15s}
+tbody tr:hover{background:rgba(191,90,242,.04)}
+tbody tr.hidden-row{display:none}
+td{padding:.7rem 1rem;vertical-align:top}
+
+/* ── Badges ── */
+.badge-id{
+  font-family:var(--font-mono);font-size:.72rem;background:var(--bg3);
+  border:1px solid var(--border);border-radius:6px;padding:.15rem .4rem;
+  color:var(--dim);
+}
+.badge-conf{
+  display:inline-block;font-size:.72rem;font-weight:700;padding:.2rem .6rem;
+  border-radius:6px;border:1px solid var(--c,#888);color:var(--c,#888);
+  font-family:var(--font-mono);
+}
+.cat-tag{
+  font-size:.72rem;background:rgba(10,132,255,.12);
+  color:var(--blue);padding:.2rem .5rem;border-radius:6px;
+  border:1px solid rgba(10,132,255,.25);
+}
+.cwe-link{
+  color:var(--purple);text-decoration:none;font-family:var(--font-mono);font-size:.8rem;
+}
+.cwe-link:hover{text-decoration:underline}
+.fn-name{color:var(--yellow);font-size:.82rem}
+.addr{color:var(--dim);font-family:var(--font-mono);font-size:.75rem}
+.cvss-badge{
+  display:inline-block;font-weight:700;font-family:var(--font-mono);
+  font-size:.85rem;color:var(--c,#888);
+}
+.sev-badge{
+  font-size:.72rem;font-weight:700;padding:.2rem .55rem;border-radius:6px;
+  background:color-mix(in srgb,var(--c,#888) 15%,transparent);
+  color:var(--c,#888);border:1px solid color-mix(in srgb,var(--c,#888) 35%,transparent);
+}
+.meta{color:var(--dim);font-size:.72rem;font-family:var(--font-mono);margin-top:.2rem}
+.prot-row{display:flex;gap:.3rem;flex-wrap:wrap}
+.p{
+  font-size:.65rem;font-weight:700;padding:.1rem .35rem;
+  border-radius:4px;font-family:var(--font-mono);
+}
+.p-ok{background:rgba(48,209,88,.15);color:var(--green);border:1px solid rgba(48,209,88,.3)}
+.p-no{background:rgba(255,45,85,.15);color:var(--red);border:1px solid rgba(255,45,85,.3)}
+.p-partial{background:rgba(255,159,10,.15);color:var(--orange);border:1px solid rgba(255,159,10,.3)}
+
+/* ── Protection tags in cards ── */
+.ptag{font-size:.7rem;font-weight:700;padding:.15rem .4rem;border-radius:5px;font-family:var(--font-mono)}
+.ptok{background:rgba(48,209,88,.1);color:var(--green);border:1px solid rgba(48,209,88,.25)}
+.ptno{background:rgba(255,45,85,.1);color:var(--red);border:1px solid rgba(255,45,85,.25)}
+.ptpart{background:rgba(255,159,10,.1);color:var(--orange);border:1px solid rgba(255,159,10,.25)}
+
+/* ── Evidence panel ── */
+.ev-btn{
+  background:transparent;border:1px solid var(--border);border-radius:6px;
+  color:var(--dim);padding:.3rem .6rem;font-size:.75rem;cursor:pointer;
+  transition:all .15s;white-space:nowrap;
+}
+.ev-btn:hover,.ev-btn.open{border-color:var(--purple);color:var(--purple)}
+.ev-panel{
+  margin-top:.6rem;background:var(--bg);border:1px solid var(--border);
+  border-radius:8px;padding:.7rem .9rem;
+}
+.ev-item{
+  font-family:var(--font-mono);font-size:.73rem;color:var(--dim);
+  padding:.2rem 0;border-bottom:1px solid var(--bg3);
+}
+.ev-item:last-child{border-bottom:none}
+.mitigation{
+  font-size:.77rem;color:var(--green);margin-top:.5rem;
+  padding-top:.4rem;border-top:1px solid var(--border);
+}
+
+/* ── Chart bar ── */
+.chart-bar-wrap{display:flex;gap:1rem;margin-bottom:2.5rem;flex-wrap:wrap}
+.chart-box{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:1.2rem 1.5rem;flex:1;min-width:220px;
+}
+.chart-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);margin-bottom:.8rem}
+.bar-item{display:flex;align-items:center;gap:.7rem;margin-bottom:.45rem}
+.bar-key{font-size:.78rem;color:var(--dim);width:90px;text-align:right;flex-shrink:0}
+.bar-track{flex:1;background:var(--bg3);border-radius:3px;height:8px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
+.bar-val{font-size:.78rem;font-family:var(--font-mono);color:var(--text);width:28px}
+
+/* ── Footer ── */
+.footer{
+  text-align:center;padding:2rem;border-top:1px solid var(--border);
+  color:var(--dim);font-size:.78rem;font-family:var(--font-mono);
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-grid">
+    <div class="logo">⬡ BS</div>
+    <div class="header-info">
+      <h1>BinSmasher CVE Audit Report</h1>
+      <p>Generated: 2026-04-05 22:07:27 UTC · Static binary analysis · Responsible disclosure</p>
+    </div>
+    <div class="stat-pills">
+      <span class="pill pill-blue">Binaries: 1</span>
+      <span class="pill pill-blue">Findings: 6</span>
+      <span class="pill pill-green">Confirmed: 6</span>
+      <span class="pill pill-yellow">Probable: 0</span>
+      <span class="pill pill-red">Critical: 3</span>
+      <span class="pill pill-orange">High: 3</span>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- ── Charts ── -->
+  <div class="section-title">Overview</div>
+  <div class="chart-bar-wrap">
+    <div class="chart-box">
+  <div class="chart-label">Severity Distribution</div>
+  
+<div class="bar-item">
+  <span class="bar-key">Critical</span>
+  <div class="bar-track"><div class="bar-fill" style="width:100%;background:#ff2d55"></div></div>
+  <span class="bar-val">3</span>
+</div>
+<div class="bar-item">
+  <span class="bar-key">High</span>
+  <div class="bar-track"><div class="bar-fill" style="width:100%;background:#ff9f0a"></div></div>
+  <span class="bar-val">3</span>
+</div>
+<div class="bar-item">
+  <span class="bar-key">Medium</span>
+  <div class="bar-track"><div class="bar-fill" style="width:0%;background:#ffd60a"></div></div>
+  <span class="bar-val">0</span>
+</div>
+<div class="bar-item">
+  <span class="bar-key">Low</span>
+  <div class="bar-track"><div class="bar-fill" style="width:0%;background:#30d158"></div></div>
+  <span class="bar-val">0</span>
+</div>
+</div>
+    <div class="chart-box">
+  <div class="chart-label">Confidence Levels</div>
+  
+<div class="bar-item">
+  <span class="bar-key">CONFIRMED</span>
+  <div class="bar-track"><div class="bar-fill" style="width:100%;background:#30d158"></div></div>
+  <span class="bar-val">6</span>
+</div>
+<div class="bar-item">
+  <span class="bar-key">PROBABLE</span>
+  <div class="bar-track"><div class="bar-fill" style="width:0%;background:#ffd60a"></div></div>
+  <span class="bar-val">0</span>
+</div>
+<div class="bar-item">
+  <span class="bar-key">UNCONFIRMED</span>
+  <div class="bar-track"><div class="bar-fill" style="width:0%;background:#636366"></div></div>
+  <span class="bar-val">0</span>
+</div>
+</div>
+    <div class="chart-box">
+  <div class="chart-label">Top Categories</div>
+  
+<div class="bar-item">
+  <span class="bar-key">BufferOverflow</span>
+  <div class="bar-track"><div class="bar-fill" style="width:100%;background:#0a84ff"></div></div>
+  <span class="bar-val">4</span>
+</div>
+<div class="bar-item">
+  <span class="bar-key">FormatString</span>
+  <div class="bar-track"><div class="bar-fill" style="width:25%;background:#0a84ff"></div></div>
+  <span class="bar-val">1</span>
+</div>
+<div class="bar-item">
+  <span class="bar-key">CommandInjection</span>
+  <div class="bar-track"><div class="bar-fill" style="width:25%;background:#0a84ff"></div></div>
+  <span class="bar-val">1</span>
+</div>
+</div>
+  </div>
+
+  <!-- ── Binary cards ── -->
+  <div class="section-title">Audited Binaries</div>
+  <div class="cards-wrap">
+<div class="card" data-score="803">
+  <div class="card-top">
+    <span class="card-name">vuln_test</span>
+    <span class="card-score">Score 803</span>
+  </div>
+  <div class="card-sub">
+    x86_64 64-bit · linux · 16,184 B
+    
+    
+  </div>
+  <div class="card-sub">owner: root · perms: 0755</div>
+  <div class="prot-row" style="margin:6px 0"><span class="ptag ptno">NX</span><span class="ptag ptno">PIE</span><span class="ptag ptno">Canary</span><span class="ptag ptno">None RELRO</span><span class="ptag ptno">Exec-Stack</span></div>
+  <div class="card-stats">
+    <span>Total: <b>6</b></span>
+    <span>Confirmed: <b style="color:#30d158">6</b></span>
+    <span>High+Critical: <b style="color:#ff2d55">6</b></span>
+  </div>
+  <div class="card-hash">SHA256: 10f89596e176b163f0d7bc8c9596d5d4…</div>
+</div>
+</div>
+
+  <!-- ── Controls ── -->
+  <div class="section-title">Vulnerability Findings</div>
+  <div class="controls">
+    <input class="search-box" type="text" id="search" placeholder="🔍  Search binary, function, CWE, category…" oninput="applyFilters()">
+    <select class="filter-sel" id="fConf" onchange="applyFilters()">
+      <option value="">All Confidence</option>
+      <option value="CONFIRMED">CONFIRMED</option>
+      <option value="PROBABLE">PROBABLE</option>
+      <option value="UNCONFIRMED">UNCONFIRMED</option>
+    </select>
+    <select class="filter-sel" id="fSev" onchange="applyFilters()">
+      <option value="">All Severity</option>
+      <option value="Critical">Critical</option>
+      <option value="High">High</option>
+      <option value="Medium">Medium</option>
+      <option value="Low">Low</option>
+    </select>
+    <select class="filter-sel" id="fCat" onchange="applyFilters()">
+      <option value="">All Categories</option>
+      <option value="BufferOverflow">BufferOverflow</option><option value="CommandInjection">CommandInjection</option><option value="FormatString">FormatString</option>
+    </select>
+    <select class="filter-sel" id="fBin" onchange="applyFilters()">
+      <option value="">All Binaries</option>
+      <option value="vuln_test">vuln_test</option>
+    </select>
+    <button class="btn-reset" onclick="resetFilters()">Reset</button>
+    <span class="count-label" id="rowCount">6 findings</span>
+  </div>
+
+  <!-- ── Table ── -->
+  <div class="tbl-wrap">
+    <table id="mainTable">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0)">ID <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(1)">Confidence <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(2)">Binary <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(3)">Category <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(4)">CWE <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(5)">Function <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(6)">Address(es) <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(7)">CVSS <span class="sort-arrow">↕</span></th>
+          <th onclick="sortTable(8)">Severity <span class="sort-arrow">↕</span></th>
+          <th>Protections</th>
+          <th>Evidence / Fix</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        
+<tr
+  data-binary="vuln_test"
+  data-confidence="CONFIRMED"
+  data-severity="Critical"
+  data-category="BufferOverflow"
+  data-cwe="CWE-120"
+  data-function="gets"
+>
+  <td><span class="badge-id">AUDIT-0001</span></td>
+  <td>
+    <span class="badge-conf" style="--c:#30d158">CONFIRMED</span>
+  </td>
+  <td>
+    <strong>vuln_test</strong>
+    <div class="meta">
+      x86_64 · 64-bit · linux<br>
+      MD5: <code>718e09a5ba469ea295ab6e7e08d92058</code>
+    </div>
+  </td>
+  <td>
+    <span class="cat-tag">BufferOverflow</span>
+  </td>
+  <td><a class="cwe-link" href="https://cwe.mitre.org/data/definitions/120.html" target="_blank">CWE-120</a></td>
+  <td><code class="fn-name">gets</code></td>
+  <td class="addr">0x401252</td>
+  <td>
+    <span class="cvss-badge" style="--c:#ff2d55">9.5</span>
+  </td>
+  <td>
+    <span class="sev-badge" style="--c:#ff2d55">Critical</span>
+  </td>
+  <td>
+    <div class="prot-row">
+      <span class="p p-no">NX</span>
+      <span class="p p-no">PIE</span>
+      <span class="p p-no">SSP</span>
+      <span class="p p-no">RELRO</span>
+      <span class="p p-no">NX-STK</span>
+    </div>
+  </td>
+  <td>
+    <button class="ev-btn" onclick="toggleEvidence(this)">▼ Evidence</button>
+    <div class="ev-panel" style="display:none"><div class="ev-item">Imported symbol: gets</div><div class="ev-item">Call sites: 0x401252</div><div class="ev-item">Disasm context: 401252:	e8 79 fe ff ff       	call   4010d0 &lt;gets@plt&gt;</div><div class="ev-item">Disasm context: 401257:	90                   	nop</div><div class="ev-item">Disasm context: 401258:	c9                   	leave</div><div class="ev-item">Disasm context: 401259:	c3                   	ret</div><div class="ev-item">Disasm context: 000000000040125a &lt;main&gt;:</div><div class="ev-item">Disasm context: 40125a:	f3 0f 1e fa          	endbr64</div><div class="ev-item">Disasm context: 40125e:	55</div><div class="ev-item">[Taint] Call path: gets</div><div class="ev-item">[Taint] Register analysis: Could not determine arg source — conservative PROBABLE</div><div class="ev-item">[Taint] Direct taint path found and register args appear user-controlled</div><div class="mitigation"><strong>Fix:</strong> Replace gets() with fgets(buf, sizeof(buf), stdin). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now).</div></div>
+  </td>
+</tr>
+
+
+<tr
+  data-binary="vuln_test"
+  data-confidence="CONFIRMED"
+  data-severity="Critical"
+  data-category="FormatString"
+  data-cwe="CWE-134"
+  data-function="printf"
+>
+  <td><span class="badge-id">AUDIT-0002</span></td>
+  <td>
+    <span class="badge-conf" style="--c:#30d158">CONFIRMED</span>
+  </td>
+  <td>
+    <strong>vuln_test</strong>
+    <div class="meta">
+      x86_64 · 64-bit · linux<br>
+      MD5: <code>718e09a5ba469ea295ab6e7e08d92058</code>
+    </div>
+  </td>
+  <td>
+    <span class="cat-tag">FormatString</span>
+  </td>
+  <td><a class="cwe-link" href="https://cwe.mitre.org/data/definitions/134.html" target="_blank">CWE-134</a></td>
+  <td><code class="fn-name">printf</code></td>
+  <td class="addr">0x401205</td>
+  <td>
+    <span class="cvss-badge" style="--c:#ff2d55">9.5</span>
+  </td>
+  <td>
+    <span class="sev-badge" style="--c:#ff2d55">Critical</span>
+  </td>
+  <td>
+    <div class="prot-row">
+      <span class="p p-no">NX</span>
+      <span class="p p-no">PIE</span>
+      <span class="p p-no">SSP</span>
+      <span class="p p-no">RELRO</span>
+      <span class="p p-no">NX-STK</span>
+    </div>
+  </td>
+  <td>
+    <button class="ev-btn" onclick="toggleEvidence(this)">▼ Evidence</button>
+    <div class="ev-panel" style="display:none"><div class="ev-item">Imported symbol: printf</div><div class="ev-item">Call sites: 0x401205</div><div class="ev-item">Disasm context: 401205:	e8 b6 fe ff ff       	call   4010c0 &lt;printf@plt&gt;</div><div class="ev-item">Disasm context: 40120a:	90                   	nop</div><div class="ev-item">Disasm context: 40120b:	c9                   	leave</div><div class="ev-item">Disasm context: 40120c:	c3                   	ret</div><div class="ev-item">Disasm context: 000000000040120d &lt;network_recv&gt;:</div><div class="ev-item">Disasm context: 40120d:	f3 0f 1e fa          	endbr64</div><div class="ev-item">Disasm context: 401211:	55</div><div class="ev-item">[Taint] Call path: main → vulnerable_copy → printf</div><div class="ev-item">[Taint] Register analysis: Could not determine arg source — conservative PROBABLE</div><div class="ev-item">[Taint] Direct taint path found and register args appear user-controlled</div><div class="mitigation"><strong>Fix:</strong> Always pass a literal format string: printf(&quot;%s&quot;, user_input). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now).</div></div>
+  </td>
+</tr>
+
+
+<tr
+  data-binary="vuln_test"
+  data-confidence="CONFIRMED"
+  data-severity="High"
+  data-category="BufferOverflow"
+  data-cwe="CWE-122"
+  data-function="recv"
+>
+  <td><span class="badge-id">AUDIT-0003</span></td>
+  <td>
+    <span class="badge-conf" style="--c:#30d158">CONFIRMED</span>
+  </td>
+  <td>
+    <strong>vuln_test</strong>
+    <div class="meta">
+      x86_64 · 64-bit · linux<br>
+      MD5: <code>718e09a5ba469ea295ab6e7e08d92058</code>
+    </div>
+  </td>
+  <td>
+    <span class="cat-tag">BufferOverflow</span>
+  </td>
+  <td><a class="cwe-link" href="https://cwe.mitre.org/data/definitions/122.html" target="_blank">CWE-122</a></td>
+  <td><code class="fn-name">recv</code></td>
+  <td class="addr">0x40123e</td>
+  <td>
+    <span class="cvss-badge" style="--c:#ff9f0a">8.8</span>
+  </td>
+  <td>
+    <span class="sev-badge" style="--c:#ff9f0a">High</span>
+  </td>
+  <td>
+    <div class="prot-row">
+      <span class="p p-no">NX</span>
+      <span class="p p-no">PIE</span>
+      <span class="p p-no">SSP</span>
+      <span class="p p-no">RELRO</span>
+      <span class="p p-no">NX-STK</span>
+    </div>
+  </td>
+  <td>
+    <button class="ev-btn" onclick="toggleEvidence(this)">▼ Evidence</button>
+    <div class="ev-panel" style="display:none"><div class="ev-item">Imported symbol: recv</div><div class="ev-item">Call sites: 0x40123e</div><div class="ev-item">Disasm context: 401232:	ba 00 04 00 00       	mov    $0x400,%edx</div><div class="ev-item">Disasm context: 401237:	89 c7                	mov    %eax,%edi</div><div class="ev-item">Disasm context: 401239:	b8 00 00 00 00       	mov    $0x0,%eax</div><div class="ev-item">Disasm context: 40123e:	e8 4d fe ff ff       	call   401090 &lt;recv@plt&gt;</div><div class="ev-item">Disasm context: 401243:	48 8d 85 70 ff ff ff 	lea    -0x90(%rbp),%rax</div><div class="ev-item">Disasm context: 40124a:	48 89 c7             	mov    %rax,%rdi</div><div class="ev-item">Disasm context: 40124d:	b8 00 00 00 00       	mov    $0x0,%eax</div><div class="ev-item">Disasm context: 401252:	e8 79 fe ff ff       	call   4010d0</div><div class="ev-item">[Taint] Call path: recv</div><div class="ev-item">[Taint] Register analysis: Could not determine arg source — conservative PROBABLE</div><div class="ev-item">[Taint] Direct taint path found and register args appear user-controlled</div><div class="mitigation"><strong>Fix:</strong> Always pass sizeof(buf) as the length argument to recv(). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now).</div></div>
+  </td>
+</tr>
+
+
+<tr
+  data-binary="vuln_test"
+  data-confidence="CONFIRMED"
+  data-severity="High"
+  data-category="BufferOverflow"
+  data-cwe="CWE-134"
+  data-function="sprintf"
+>
+  <td><span class="badge-id">AUDIT-0004</span></td>
+  <td>
+    <span class="badge-conf" style="--c:#30d158">CONFIRMED</span>
+  </td>
+  <td>
+    <strong>vuln_test</strong>
+    <div class="meta">
+      x86_64 · 64-bit · linux<br>
+      MD5: <code>718e09a5ba469ea295ab6e7e08d92058</code>
+    </div>
+  </td>
+  <td>
+    <span class="cat-tag">BufferOverflow</span>
+  </td>
+  <td><a class="cwe-link" href="https://cwe.mitre.org/data/definitions/134.html" target="_blank">CWE-134</a></td>
+  <td><code class="fn-name">sprintf</code></td>
+  <td class="addr">0x40129f</td>
+  <td>
+    <span class="cvss-badge" style="--c:#ff9f0a">7.2</span>
+  </td>
+  <td>
+    <span class="sev-badge" style="--c:#ff9f0a">High</span>
+  </td>
+  <td>
+    <div class="prot-row">
+      <span class="p p-no">NX</span>
+      <span class="p p-no">PIE</span>
+      <span class="p p-no">SSP</span>
+      <span class="p p-no">RELRO</span>
+      <span class="p p-no">NX-STK</span>
+    </div>
+  </td>
+  <td>
+    <button class="ev-btn" onclick="toggleEvidence(this)">▼ Evidence</button>
+    <div class="ev-panel" style="display:none"><div class="ev-item">Imported symbol: sprintf</div><div class="ev-item">Call sites: 0x40129f</div><div class="ev-item">Disasm context: 401294:	48 89 d6             	mov    %rdx,%rsi</div><div class="ev-item">Disasm context: 401297:	48 89 c7             	mov    %rax,%rdi</div><div class="ev-item">Disasm context: 40129a:	b8 00 00 00 00       	mov    $0x0,%eax</div><div class="ev-item">Disasm context: 40129f:	e8 3c fe ff ff       	call   4010e0 &lt;sprintf@plt&gt;</div><div class="ev-item">Disasm context: 4012a4:	48 8b 85 f0 fe ff ff 	mov    -0x110(%rbp),%rax</div><div class="ev-item">Disasm context: 4012ab:	48 83 c0 08          	add    $0x8,%rax</div><div class="ev-item">Disasm context: 4012af:	48 8b 00             	mov    (%rax),%rax</div><div class="ev-item">Disasm context: 4012b2:	48 89 c7             	mov    %ra</div><div class="ev-item">[Taint] Call path: main → sprintf</div><div class="ev-item">[Taint] Register analysis: Could not determine arg source — conservative PROBABLE</div><div class="ev-item">[Taint] Direct taint path found and register args appear user-controlled</div><div class="mitigation"><strong>Fix:</strong> Replace sprintf() with snprintf() with explicit size. Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now).</div></div>
+  </td>
+</tr>
+
+
+<tr
+  data-binary="vuln_test"
+  data-confidence="CONFIRMED"
+  data-severity="High"
+  data-category="BufferOverflow"
+  data-cwe="CWE-120"
+  data-function="strcpy"
+>
+  <td><span class="badge-id">AUDIT-0005</span></td>
+  <td>
+    <span class="badge-conf" style="--c:#30d158">CONFIRMED</span>
+  </td>
+  <td>
+    <strong>vuln_test</strong>
+    <div class="meta">
+      x86_64 · 64-bit · linux<br>
+      MD5: <code>718e09a5ba469ea295ab6e7e08d92058</code>
+    </div>
+  </td>
+  <td>
+    <span class="cat-tag">BufferOverflow</span>
+  </td>
+  <td><a class="cwe-link" href="https://cwe.mitre.org/data/definitions/120.html" target="_blank">CWE-120</a></td>
+  <td><code class="fn-name">strcpy</code></td>
+  <td class="addr">0x4011f4</td>
+  <td>
+    <span class="cvss-badge" style="--c:#ff9f0a">7.8</span>
+  </td>
+  <td>
+    <span class="sev-badge" style="--c:#ff9f0a">High</span>
+  </td>
+  <td>
+    <div class="prot-row">
+      <span class="p p-no">NX</span>
+      <span class="p p-no">PIE</span>
+      <span class="p p-no">SSP</span>
+      <span class="p p-no">RELRO</span>
+      <span class="p p-no">NX-STK</span>
+    </div>
+  </td>
+  <td>
+    <button class="ev-btn" onclick="toggleEvidence(this)">▼ Evidence</button>
+    <div class="ev-panel" style="display:none"><div class="ev-item">Imported symbol: strcpy</div><div class="ev-item">Call sites: 0x4011f4</div><div class="ev-item">Disasm context: 4011ea:	48 8d 45 c0          	lea    -0x40(%rbp),%rax</div><div class="ev-item">Disasm context: 4011ee:	48 89 d6             	mov    %rdx,%rsi</div><div class="ev-item">Disasm context: 4011f1:	48 89 c7             	mov    %rax,%rdi</div><div class="ev-item">Disasm context: 4011f4:	e8 a7 fe ff ff       	call   4010a0 &lt;strcpy@plt&gt;</div><div class="ev-item">Disasm context: 4011f9:	48 8d 45 c0          	lea    -0x40(%rbp),%rax</div><div class="ev-item">Disasm context: 4011fd:	48 89 c7             	mov    %rax,%rdi</div><div class="ev-item">Disasm context: 401200:	b8 00 00 00 00       	mov    $0x0,%eax</div><div class="ev-item">Disasm context: 401205:	e8 b6 fe ff ff       	call   4010c0</div><div class="ev-item">[Taint] Call path: main → vulnerable_copy → strcpy</div><div class="ev-item">[Taint] Register analysis: Could not determine arg source — conservative PROBABLE</div><div class="ev-item">[Taint] Direct taint path found and register args appear user-controlled</div><div class="mitigation"><strong>Fix:</strong> Replace strcpy() with strlcpy() or snprintf(). Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now).</div></div>
+  </td>
+</tr>
+
+
+<tr
+  data-binary="vuln_test"
+  data-confidence="CONFIRMED"
+  data-severity="Critical"
+  data-category="CommandInjection"
+  data-cwe="CWE-78"
+  data-function="system"
+>
+  <td><span class="badge-id">AUDIT-0006</span></td>
+  <td>
+    <span class="badge-conf" style="--c:#30d158">CONFIRMED</span>
+  </td>
+  <td>
+    <strong>vuln_test</strong>
+    <div class="meta">
+      x86_64 · 64-bit · linux<br>
+      MD5: <code>718e09a5ba469ea295ab6e7e08d92058</code>
+    </div>
+  </td>
+  <td>
+    <span class="cat-tag">CommandInjection</span>
+  </td>
+  <td><a class="cwe-link" href="https://cwe.mitre.org/data/definitions/78.html" target="_blank">CWE-78</a></td>
+  <td><code class="fn-name">system</code></td>
+  <td class="addr">0x4012c4</td>
+  <td>
+    <span class="cvss-badge" style="--c:#ff2d55">9.5</span>
+  </td>
+  <td>
+    <span class="sev-badge" style="--c:#ff2d55">Critical</span>
+  </td>
+  <td>
+    <div class="prot-row">
+      <span class="p p-no">NX</span>
+      <span class="p p-no">PIE</span>
+      <span class="p p-no">SSP</span>
+      <span class="p p-no">RELRO</span>
+      <span class="p p-no">NX-STK</span>
+    </div>
+  </td>
+  <td>
+    <button class="ev-btn" onclick="toggleEvidence(this)">▼ Evidence</button>
+    <div class="ev-panel" style="display:none"><div class="ev-item">Imported symbol: system</div><div class="ev-item">Call sites: 0x4012c4</div><div class="ev-item">Disasm context: 4012c9:	b8 00 00 00 00       	mov    $0x0,%eax</div><div class="ev-item">Disasm context: 4012ce:	c9                   	leave</div><div class="ev-item">Disasm context: 4012cf:	c3                   	ret</div><div class="ev-item">Disasm context: Disassembly of section .fini:</div><div class="ev-item">Disasm context: 00000000004012d0 &lt;_fini&gt;:</div><div class="ev-item">Disasm context: 4012d0:	f3 0f 1e</div><div class="ev-item">[Taint] Call path: main → system</div><div class="ev-item">[Taint] Register analysis: Could not determine arg source — conservative PROBABLE</div><div class="ev-item">[Taint] Direct taint path found and register args appear user-controlled</div><div class="mitigation"><strong>Fix:</strong> Avoid system(). Use execve() with a fixed path and validated args. Compiler hardening: enable NX/DEP (-Wl,-z,noexecstack), compile with -fPIE -pie, enable stack canaries (-fstack-protector-strong), enable RELRO (-Wl,-z,relro,-z,now).</div></div>
+  </td>
+</tr>
+
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<footer class="footer">
+  BinSmasher CVE Auditor v3 · Static analysis only · No exploitation · Responsible disclosure
+</footer>
+
+<script>
+function applyFilters() {
+  const q    = document.getElementById('search').value.toLowerCase();
+  const conf = document.getElementById('fConf').value;
+  const sev  = document.getElementById('fSev').value;
+  const cat  = document.getElementById('fCat').value;
+  const bin  = document.getElementById('fBin').value;
+  const rows = document.querySelectorAll('#tableBody tr');
+  let visible = 0;
+  rows.forEach(row => {
+    const txt  = row.textContent.toLowerCase();
+    const show = (
+      (!q    || txt.includes(q)) &&
+      (!conf || row.dataset.confidence === conf) &&
+      (!sev  || row.dataset.severity   === sev) &&
+      (!cat  || row.dataset.category   === cat) &&
+      (!bin  || row.dataset.binary     === bin)
+    );
+    row.classList.toggle('hidden-row', !show);
+    if (show) visible++;
+  });
+  document.getElementById('rowCount').textContent = visible + ' findings';
+}
+
+function resetFilters() {
+  ['search','fConf','fSev','fCat','fBin'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el.tagName === 'INPUT') el.value = '';
+    else el.value = '';
+  });
+  applyFilters();
+}
+
+function toggleEvidence(btn) {
+  const panel = btn.nextElementSibling;
+  const open  = panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  btn.textContent = open ? '▲ Evidence' : '▼ Evidence';
+  btn.classList.toggle('open', open);
+}
+
+let sortDir = {};
+function sortTable(col) {
+  const tbody = document.getElementById('tableBody');
+  const rows  = Array.from(tbody.querySelectorAll('tr'));
+  sortDir[col] = !sortDir[col];
+  rows.sort((a, b) => {
+    const at = a.cells[col]?.textContent.trim() || '';
+    const bt = b.cells[col]?.textContent.trim() || '';
+    const an = parseFloat(at), bn = parseFloat(bt);
+    if (!isNaN(an) && !isNaN(bn)) return sortDir[col] ? an-bn : bn-an;
+    return sortDir[col] ? at.localeCompare(bt) : bt.localeCompare(at);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+</script>
+</body>
+</html>
