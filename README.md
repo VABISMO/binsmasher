@@ -775,8 +775,10 @@ SOL — `GYBiTvVbPvPJP7ZK5oaqc9w6UtHvd6NkhSPP2UBhDvfh`
 
 ## Authors 
 
-V.Nos - Cryptocalypse
+AncientEncoder 
 
 A.Canto - InsecureWorld
+
+V.Nos - Cryptocalypse
 
 BinSmasher Team
