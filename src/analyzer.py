@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
 """
-BinSmasher – analyzer.py
-Static & dynamic binary analysis: protections, functions, libraries.
-
-FIX (v2): static_analysis now searches both iz~ (strings) and is~ (symbols)
-           so imported library functions (printf, snprintf, gets …) are
-           correctly detected even in stripped or dynamically-linked binaries.
+BinSmasher – analyzer.py  v4
+Static & dynamic analysis.
+New: query_libc_rip, detect_seccomp, patch_binary_for_local.
 """
 
-import subprocess
-import os
-import re
-import time
-import logging
-
+import subprocess, os, re, time, json, logging, urllib.request, urllib.error
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
 console = Console()
@@ -23,565 +14,438 @@ log = logging.getLogger("binsmasher")
 
 
 class BinaryAnalyzer:
-    """Static and dynamic analysis of a target binary."""
 
     VULNERABLE_FUNCTIONS = [
-        "gets", "strcpy", "strcat", "sprintf", "vsprintf",
-        "scanf", "sscanf", "read", "fread", "recv",
-        "memcpy", "memmove", "strncpy", "strncat",
-        "mpg123_decode", "malloc", "free", "realloc", "calloc",
+        "gets","strcpy","strcat","sprintf","vsprintf","scanf","sscanf",
+        "read","fread","recv","memcpy","memmove","strncpy","strncat",
+        "mpg123_decode","malloc","free","realloc","calloc",
     ]
     FORMAT_STRING_FUNCTIONS = [
-        "printf", "fprintf", "sprintf", "snprintf",
-        "vprintf", "vfprintf", "vsprintf", "vsnprintf",
-        "dprintf", "syslog",
+        "printf","fprintf","sprintf","snprintf","vprintf","vfprintf",
+        "vsprintf","vsnprintf","dprintf","syslog",
     ]
     RUST_SPECIFIC = [
-        "panic", "assert", "unwrap", "deserial", "borsh",
-        "bincode", "execute_transaction", "process_transaction",
-        "solana_program", "anchor_lang",
+        "panic","assert","unwrap","deserial","borsh","bincode",
+        "execute_transaction","process_transaction","solana_program","anchor_lang",
     ]
 
-    def __init__(self, binary: str, log_file: str) -> None:
+    def __init__(self, binary, log_file):
         self.binary   = binary
         self.log_file = log_file
-        self.platform: str = "linux"
-        self.arch: str     = "amd64"
+        self.platform = "linux"
+        self.arch     = "amd64"
 
-    # ────────────────────────────────────────────
-    # 1. Platform / arch detection
-    # ────────────────────────────────────────────
-
-    def setup_context(self) -> tuple:
+    def setup_context(self):
         try:
-            result = subprocess.check_output(
-                ["file", self.binary], stderr=subprocess.DEVNULL
-            ).decode().lower()
+            result = subprocess.check_output(["file",self.binary],
+                                              stderr=subprocess.DEVNULL).decode().lower()
         except FileNotFoundError:
-            log.error("`file` command not found.")
-            raise SystemExit(1)
-
+            log.error("`file` command not found."); raise SystemExit(1)
         platform, arch = "linux", "amd64"
-
         if "elf" in result:
             platform = "android" if "arm" in result else "linux"
-            if "32-bit" in result:
-                arch = "arm" if "arm" in result else "i386"
-            elif "64-bit" in result:
-                arch = "aarch64" if "aarch64" in result else "amd64"
-        elif "pe32+" in result:
-            platform, arch = "windows", "amd64"
-        elif "pe32" in result:
-            platform, arch = "windows", "i386"
+            if "32-bit" in result:   arch = "arm" if "arm" in result else "i386"
+            elif "64-bit" in result: arch = "aarch64" if "aarch64" in result else "amd64"
+        elif "pe32+" in result: platform, arch = "windows","amd64"
+        elif "pe32" in result:  platform, arch = "windows","i386"
         elif "mach-o" in result:
-            platform = "macos"
-            arch = "arm64" if "arm64" in result else "amd64"
-        else:
-            log.warning("Unknown binary format — assuming Linux x86_64")
-
+            platform="macos"; arch="arm64" if "arm64" in result else "amd64"
+        else: log.warning("Unknown binary format — assuming Linux x86_64")
         try:
-            from pwn import context as pctx  # type: ignore
-            pctx(arch=arch, os=platform if platform != "macos" else "linux")
-        except Exception as e:
-            log.warning(f"pwntools context: {e}")
-
+            from pwn import context as pctx
+            pctx(arch=arch, os=platform if platform!="macos" else "linux")
+        except Exception as e: log.warning(f"pwntools context: {e}")
         log.info(f"Platform: {platform.upper()}  Arch: {arch}")
-        self.platform = platform
-        self.arch = arch
+        self.platform = platform; self.arch = arch
         return platform, arch
 
-    # ────────────────────────────────────────────
-    # 2. Static analysis via Radare2
-    # ────────────────────────────────────────────
-
-    def static_analysis(self) -> tuple:
+    def static_analysis(self):
         log.info("Running static analysis (radare2)…")
-
         network_funcs = {
             "linux":   ["socket","bind","connect","listen","accept","recv","send","recvfrom","sendto"],
             "android": ["socket","bind","connect","listen","accept","recv","send","recvfrom","sendto"],
             "windows": ["WSAStartup","socket","bind","connect","listen","accept","recv","send"],
             "macos":   ["socket","bind","connect","listen","accept","recv","send"],
         }.get(self.platform, ["socket","recv","send"])
-
-        findings = {
-            "vulnerable_functions":    [],
-            "format_string_functions": [],
-            "network_functions":       [],
-            "heap_functions":          [],
-            "rust_functions":          [],
-            "all_functions":           [],
-        }
-
-        all_searched = (
-            self.VULNERABLE_FUNCTIONS
-            + self.FORMAT_STRING_FUNCTIONS
-            + network_funcs
-            + self.RUST_SPECIFIC
-        )
-
-        # ── FIX: use BOTH iz (strings) and is (dynamic symbols) ──
+        findings = {"vulnerable_functions":[],"format_string_functions":[],
+                    "network_functions":[],"heap_functions":[],"rust_functions":[],"all_functions":[]}
+        all_searched = (self.VULNERABLE_FUNCTIONS+self.FORMAT_STRING_FUNCTIONS
+                        +network_funcs+self.RUST_SPECIFIC)
         r2_out = ""
-        for r2_cmd in (
-            f"aaa; iz~{'|'.join(all_searched)}",   # strings section
-            f"is~{'|'.join(all_searched)}",          # symbol table (imports)
-            f"ii~{'|'.join(all_searched)}",          # imports list
-        ):
-            try:
-                r2_out += self._r2(r2_cmd) + "\n"
-            except Exception as e:
-                log.debug(f"r2 cmd '{r2_cmd[:40]}…' failed: {e}")
-
-        # Also try nm / readelf as fallback for function detection
+        for r2_cmd in (f"aaa; iz~{'|'.join(all_searched)}", f"is~{'|'.join(all_searched)}",
+                       f"ii~{'|'.join(all_searched)}"):
+            try: r2_out += self._r2(r2_cmd) + "\n"
+            except Exception as e: log.debug(f"r2 cmd failed: {e}")
         nm_out = ""
-        try:
-            nm_out = subprocess.check_output(
-                ["nm", "-D", self.binary], stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
-        except Exception:
-            pass
-        try:
-            nm_out += subprocess.check_output(
-                ["readelf", "-s", self.binary], stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
-        except Exception:
-            pass
-
+        for cmd in (["nm","-D",self.binary],["readelf","-s",self.binary]):
+            try: nm_out += subprocess.check_output(cmd,stderr=subprocess.DEVNULL).decode(errors="ignore")
+            except: pass
         combined = r2_out + nm_out
-
         for fn in self.VULNERABLE_FUNCTIONS:
             if fn in combined:
                 findings["vulnerable_functions"].append(fn)
-                if fn in ("malloc", "free", "realloc", "calloc"):
+                if fn in ("malloc","free","realloc","calloc"):
                     findings["heap_functions"].append(fn)
         for fn in self.FORMAT_STRING_FUNCTIONS:
-            if fn in combined:
-                findings["format_string_functions"].append(fn)
+            if fn in combined: findings["format_string_functions"].append(fn)
         for fn in network_funcs:
-            if fn in combined:
-                findings["network_functions"].append(fn)
+            if fn in combined: findings["network_functions"].append(fn)
         for fn in self.RUST_SPECIFIC:
-            if fn in combined:
-                findings["rust_functions"].append(fn)
-
-        # Deduplicate
+            if fn in combined: findings["rust_functions"].append(fn)
         for k in findings:
-            if k != "all_functions":
-                findings[k] = list(dict.fromkeys(findings[k]))
-
-        # ── Function listing ──
+            if k != "all_functions": findings[k] = list(dict.fromkeys(findings[k]))
         functions = self._list_functions()
         findings["all_functions"] = functions
-
         if not functions:
             log.warning("No functions detected — binary may be stripped.")
             return findings, None, []
-
-        # ── Choose target function ──
-        priority_keywords = [
-            "main", "handle", "client", "process", "input",
-            "recv", "read", "transaction", "execute", "svm", "borsh",
-        ]
+        priority_keywords = ["main","handle","client","process","input","recv","read",
+                             "transaction","execute","svm","borsh"]
         target_function = None
         for kw in priority_keywords:
-            for name, _ in functions:
-                if kw in name.lower():
-                    target_function = name
-                    break
-            if target_function:
-                break
-        if not target_function:
-            target_function = functions[0][0]
-
-        # ── Pretty table ──
-        table = Table(title="Static Analysis", show_header=True, header_style="bold cyan")
-        table.add_column("Category", style="cyan")
-        table.add_column("Detected", style="white")
-        for k, v in findings.items():
-            if k != "all_functions":
-                table.add_row(k.replace("_", " ").title(), ", ".join(v) or "—")
-        table.add_row("Target Function", target_function)
-        table.add_row(
-            "Fn sample (first 8)",
-            ", ".join(n for n, _ in functions[:8]) + ("…" if len(functions) > 8 else ""),
-        )
+            for name,_ in functions:
+                if kw in name.lower(): target_function=name; break
+            if target_function: break
+        if not target_function: target_function = functions[0][0]
+        table = Table(title="Static Analysis",show_header=True,header_style="bold cyan")
+        table.add_column("Category",style="cyan"); table.add_column("Detected",style="white")
+        for k,v in findings.items():
+            if k!="all_functions": table.add_row(k.replace("_"," ").title(),", ".join(v) or "—")
+        table.add_row("Target Function",target_function)
+        table.add_row("Fn sample (first 8)",
+                      ", ".join(n for n,_ in functions[:8])+("…" if len(functions)>8 else ""))
         console.print(table)
         log.debug(f"All functions ({len(functions)}): {[n for n,_ in functions]}")
         return findings, target_function, functions
 
-    def _list_functions(self) -> list:
-        for cmd in ("afl", "afll"):
+    def _list_functions(self):
+        for cmd in ("afl","afll"):
             try:
-                raw = self._r2(cmd)
-                fns = self._parse_function_list(raw)
-                if fns:
-                    return fns
-            except Exception:
-                pass
-
-        # symbol table fallback
+                raw=self._r2(cmd); fns=self._parse_function_list(raw)
+                if fns: return fns
+            except: pass
         try:
-            raw = self._r2("is")
-            fns = []
+            raw=self._r2("is"); fns=[]
             for line in raw.splitlines():
-                parts = line.split()
-                if len(parts) >= 4 and parts[0].startswith("0x") and "FUNC" in line:
+                parts=line.split()
+                if len(parts)>=4 and parts[0].startswith("0x") and "FUNC" in line:
                     try:
-                        addr = int(parts[0], 16)
-                        name = parts[-1]
-                        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
-                            fns.append((name, addr))
-                    except (ValueError, IndexError):
-                        pass
-            if fns:
-                return fns
-        except Exception:
-            pass
-
-        # nm fallback
+                        addr=int(parts[0],16); name=parts[-1]
+                        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$",name): fns.append((name,addr))
+                    except: pass
+            if fns: return fns
+        except: pass
         try:
-            out = subprocess.check_output(
-                ["nm", self.binary], stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
-            fns = []
+            out=subprocess.check_output(["nm",self.binary],stderr=subprocess.DEVNULL).decode(errors="ignore")
+            fns=[]
             for line in out.splitlines():
-                parts = line.split()
-                if len(parts) >= 3 and parts[1] in ("T", "t"):
-                    name = parts[2]
-                    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
-                        fns.append((name, int(parts[0], 16) if parts[0] != "0"*len(parts[0]) else 0))
-            if fns:
-                return fns
-        except Exception:
-            pass
+                parts=line.split()
+                if len(parts)>=3 and parts[1] in ("T","t"):
+                    name=parts[2]
+                    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$",name):
+                        fns.append((name, int(parts[0],16) if parts[0]!="0"*len(parts[0]) else 0))
+            if fns: return fns
+        except: pass
+        return [("main",0x0)]
 
-        return [("main", 0x0)]
-
-    def _parse_function_list(self, raw: str) -> list:
-        fns = []
+    def _parse_function_list(self,raw):
+        fns=[]
         for line in raw.splitlines():
-            parts = line.split()
-            if not parts or not parts[0].startswith("0x"):
-                continue
+            parts=line.split()
+            if not parts or not parts[0].startswith("0x"): continue
             try:
-                addr = int(parts[0], 16)
-                name = parts[-1]
-                if (name
-                        and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name)
-                        and not name.startswith(("sym.imp.", "loc.", "sub."))):
-                    fns.append((name, addr))
-            except (ValueError, IndexError):
-                pass
+                addr=int(parts[0],16); name=parts[-1]
+                if (name and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$",name)
+                        and not name.startswith(("sym.imp.","loc.","sub."))):
+                    fns.append((name,addr))
+            except: pass
         return fns
 
-    def _r2(self, cmd: str) -> str:
-        full = f"r2 -A -q -c '{cmd}' {self.binary}"
-        return subprocess.check_output(
-            full, shell=True, stderr=subprocess.DEVNULL, timeout=30
-        ).decode(errors="ignore")
+    def _r2(self,cmd):
+        full=f"r2 -A -q -c '{cmd}' {self.binary}"
+        return subprocess.check_output(full,shell=True,
+                                        stderr=subprocess.DEVNULL,timeout=30).decode(errors="ignore")
 
-    # ────────────────────────────────────────────
-    # 3. Protection detection
-    # ────────────────────────────────────────────
-
-    def check_protections(self) -> tuple:
-        """
-        Returns:
-            (stack_exec, nx, aslr, canary, relro,
-             safeseh, cfg, fortify, pie, shadow_stack)
-        """
+    def check_protections(self):
         log.info("Checking binary protections…")
-
-        stack_exec = True
-        nx = aslr = canary = pie = False
-        relro = "No RELRO"
-        safeseh = cfg = fortify = shadow_stack = "N/A"
-
+        stack_exec=True; nx=aslr=canary=pie=False
+        relro="No RELRO"; safeseh=cfg=fortify=shadow_stack="N/A"
         try:
-            if self.platform in ("linux", "android"):
-                stack_exec, nx, aslr, canary, relro, pie, fortify, shadow_stack = \
-                    self._checksec_linux()
-            elif self.platform == "windows":
-                nx, aslr, canary, safeseh, cfg, pie = self._checksec_windows()
-                stack_exec = not nx
-            elif self.platform == "macos":
-                stack_exec, nx, aslr, canary, pie = self._checksec_macos()
-        except Exception as e:
-            log.warning(f"Protection check error: {e} — assuming weak protections.")
-
-        table = Table(title="Binary Protections", show_header=True, header_style="bold cyan")
-        table.add_column("Protection", style="cyan")
-        table.add_column("Value",      style="white")
-
+            if self.platform in ("linux","android"):
+                stack_exec,nx,aslr,canary,relro,pie,fortify,shadow_stack=self._checksec_linux()
+            elif self.platform=="windows":
+                nx,aslr,canary,safeseh,cfg,pie=self._checksec_windows(); stack_exec=not nx
+            elif self.platform=="macos":
+                stack_exec,nx,aslr,canary,pie=self._checksec_macos()
+        except Exception as e: log.warning(f"Protection check error: {e}")
+        table=Table(title="Binary Protections",show_header=True,header_style="bold cyan")
+        table.add_column("Protection",style="cyan"); table.add_column("Value",style="white")
         def yn(v): return "[green]Yes[/]" if v else "[red]No[/]"
-
-        table.add_row("NX / DEP",           yn(nx))
-        table.add_row("Stack Canary",        yn(canary))
-        table.add_row("ASLR / PIE",          f"{yn(aslr)} / {yn(pie)}")
-        table.add_row("RELRO",               relro)
-        table.add_row("Stack Executable",    yn(stack_exec))
-        table.add_row("FORTIFY_SOURCE",      str(fortify))
-        table.add_row("Shadow Stack (CET)",  str(shadow_stack))
-        if self.platform == "windows":
-            table.add_row("SafeSEH", str(safeseh))
-            table.add_row("CFG",     str(cfg))
+        table.add_row("NX / DEP",yn(nx)); table.add_row("Stack Canary",yn(canary))
+        table.add_row("ASLR / PIE",f"{yn(aslr)} / {yn(pie)}"); table.add_row("RELRO",relro)
+        table.add_row("Stack Executable",yn(stack_exec)); table.add_row("FORTIFY_SOURCE",str(fortify))
+        table.add_row("Shadow Stack (CET)",str(shadow_stack))
+        if self.platform=="windows":
+            table.add_row("SafeSEH",str(safeseh)); table.add_row("CFG",str(cfg))
         console.print(table)
-
-        return stack_exec, nx, aslr, canary, relro, safeseh, cfg, fortify, pie, shadow_stack
+        return stack_exec,nx,aslr,canary,relro,safeseh,cfg,fortify,pie,shadow_stack
 
     def _checksec_linux(self):
-        stack_exec = nx = aslr = canary = pie = False
-        relro = "No RELRO"
-        fortify = "Disabled"
-        shadow_stack = "Disabled"
-
+        stack_exec=nx=aslr=canary=pie=False; relro="No RELRO"
+        fortify="Disabled"; shadow_stack="Disabled"
         try:
-            re_out = subprocess.check_output(
-                ["readelf", "-W", "-l", self.binary], stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
-            # GNU_STACK with RWE = executable stack
+            re_out=subprocess.check_output(["readelf","-W","-l",self.binary],
+                                            stderr=subprocess.DEVNULL).decode(errors="ignore")
             for line in re_out.splitlines():
-                if "GNU_STACK" in line:
-                    stack_exec = "RWE" in line
-                    break
-            nx = not stack_exec
-
+                if "GNU_STACK" in line: stack_exec="RWE" in line; break
+            nx=not stack_exec
             if "GNU_PROPERTY" in re_out:
-                props = subprocess.check_output(
-                    ["readelf", "-n", self.binary], stderr=subprocess.DEVNULL
-                ).decode(errors="ignore")
-                if "IBT" in props or "SHSTK" in props:
-                    shadow_stack = "Enabled (CET)"
-        except Exception:
-            pass
-
-        # checksec
+                props=subprocess.check_output(["readelf","-n",self.binary],
+                                               stderr=subprocess.DEVNULL).decode(errors="ignore")
+                if "IBT" in props or "SHSTK" in props: shadow_stack="Enabled (CET)"
+        except: pass
         try:
-            cs = subprocess.check_output(
-                ["checksec", "--file", self.binary], stderr=subprocess.STDOUT
-            ).decode(errors="ignore")
-            nx      = nx or ("NX enabled" in cs)
-            aslr    = "PIE enabled" in cs
-            canary  = "Canary found" in cs
-            pie     = aslr
-            fortify = "Fortified" if "FORTIFY" in cs else "Disabled"
-            if "Full RELRO" in cs:
-                relro = "Full RELRO"
-            elif "Partial RELRO" in cs:
-                relro = "Partial RELRO"
+            cs=subprocess.check_output(["checksec","--file",self.binary],
+                                        stderr=subprocess.STDOUT).decode(errors="ignore")
+            nx=nx or ("NX enabled" in cs); aslr="PIE enabled" in cs; canary="Canary found" in cs
+            pie=aslr; fortify="Fortified" if "FORTIFY" in cs else "Disabled"
+            if "Full RELRO" in cs: relro="Full RELRO"
+            elif "Partial RELRO" in cs: relro="Partial RELRO"
         except FileNotFoundError:
             log.warning("checksec not installed — using readelf/nm fallback")
-            # Canary via nm
             try:
-                nm = subprocess.check_output(
-                    ["nm", "-D", self.binary], stderr=subprocess.DEVNULL
-                ).decode(errors="ignore")
-                canary = "__stack_chk_fail" in nm
-            except Exception:
-                pass
-            # RELRO via readelf
+                nm=subprocess.check_output(["nm","-D",self.binary],
+                                            stderr=subprocess.DEVNULL).decode(errors="ignore")
+                canary="__stack_chk_fail" in nm
+            except: pass
             try:
-                re_dyn = subprocess.check_output(
-                    ["readelf", "-d", self.binary], stderr=subprocess.DEVNULL
-                ).decode(errors="ignore")
-                if "BIND_NOW" in re_dyn:
-                    relro = "Full RELRO"
-                elif "GNU_RELRO" in re_dyn:
-                    relro = "Partial RELRO"
-            except Exception:
-                pass
-
-        return stack_exec, nx, aslr, canary, relro, pie, fortify, shadow_stack
+                re_dyn=subprocess.check_output(["readelf","-d",self.binary],
+                                                stderr=subprocess.DEVNULL).decode(errors="ignore")
+                if "BIND_NOW" in re_dyn: relro="Full RELRO"
+                elif "GNU_RELRO" in re_dyn: relro="Partial RELRO"
+            except: pass
+        return stack_exec,nx,aslr,canary,relro,pie,fortify,shadow_stack
 
     def _checksec_windows(self):
-        import pefile  # type: ignore
-        nx = aslr = canary = False
-        safeseh = cfg = "Disabled"
-        pe = pefile.PE(self.binary)
-        dc = pe.OPTIONAL_HEADER.DllCharacteristics
-        nx      = bool(dc & 0x0100)
-        aslr    = bool(dc & 0x0040)
-        canary  = bool(dc & 0x10000)
-        safeseh = "Enabled" if dc & 0x0400 else "Disabled"
-        cfg     = "Enabled" if dc & 0x4000 else "Disabled"
-        pie     = aslr
-        return nx, aslr, canary, safeseh, cfg, pie
+        import pefile
+        nx=aslr=canary=False; safeseh=cfg="Disabled"
+        pe=pefile.PE(self.binary); dc=pe.OPTIONAL_HEADER.DllCharacteristics
+        nx=bool(dc&0x0100); aslr=bool(dc&0x0040); canary=bool(dc&0x10000)
+        safeseh="Enabled" if dc&0x0400 else "Disabled"; cfg="Enabled" if dc&0x4000 else "Disabled"
+        return nx,aslr,canary,safeseh,cfg,aslr
 
     def _checksec_macos(self):
-        stack_exec = nx = aslr = canary = pie = False
+        stack_exec=nx=aslr=canary=pie=False
         try:
-            out = subprocess.check_output(
-                ["otool", "-l", self.binary], stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
-            nx   = "stack_exec" not in out
-            aslr = "PIE" in out
-            pie  = aslr
-            nm   = subprocess.check_output(
-                ["nm", self.binary], stderr=subprocess.DEVNULL
-            ).decode(errors="ignore")
-            canary = "___stack_chk_guard" in nm
-        except Exception as e:
-            log.warning(f"macOS checksec failed: {e}")
-        return stack_exec, nx, aslr, canary, pie
+            out=subprocess.check_output(["otool","-l",self.binary],
+                                         stderr=subprocess.DEVNULL).decode(errors="ignore")
+            nx="stack_exec" not in out; aslr=pie="PIE" in out
+            nm=subprocess.check_output(["nm",self.binary],
+                                        stderr=subprocess.DEVNULL).decode(errors="ignore")
+            canary="___stack_chk_guard" in nm
+        except Exception as e: log.warning(f"macOS checksec: {e}")
+        return stack_exec,nx,aslr,canary,pie
 
-    # ────────────────────────────────────────────
-    # 4. Frida dynamic analysis
-    # ────────────────────────────────────────────
-
-    def frida_analyze(self, binary_args: list) -> bool:
+    def frida_analyze(self,binary_args):
         log.info("Starting Frida dynamic analysis…")
-        try:
-            import frida  # type: ignore
-        except ImportError:
-            log.error("frida not installed: pip install frida-tools")
-            return False
-
-        script_code = """
+        try: import frida
+        except ImportError: log.error("frida not installed: pip install frida-tools"); return False
+        script_code="""
 'use strict';
-const targets = ["gets","strcpy","sprintf","scanf","recv","read",
-                 "malloc","free","printf","system"];
-targets.forEach(function(fn) {
-    var addr = Module.findExportByName(null, fn);
-    if (!addr) return;
-    Interceptor.attach(addr, {
-        onEnter: function(args) {
-            send({fn: fn, arg0: args[0].toString(), tid: this.threadId});
-        }
-    });
+const targets=["gets","strcpy","sprintf","scanf","recv","read","malloc","free","printf","system"];
+targets.forEach(function(fn){
+    var addr=Module.findExportByName(null,fn); if(!addr)return;
+    Interceptor.attach(addr,{onEnter:function(args){send({fn:fn,arg0:args[0].toString(),tid:this.threadId});}});
 });
 """
-        cmd = [self.binary] + binary_args if binary_args else [self.binary]
+        cmd=[self.binary]+binary_args if binary_args else [self.binary]
         try:
             import subprocess as sp
-            proc = sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
-            time.sleep(0.5)
-            session = frida.attach(proc.pid)
-            script  = session.create_script(script_code)
-            msgs    = []
-            script.on("message", lambda m, d: msgs.append(m))
-            script.load()
-            time.sleep(3)
-            script.unload()
-            session.detach()
-            proc.terminate()
+            proc=sp.Popen(cmd,stdout=sp.DEVNULL,stderr=sp.DEVNULL)
+            time.sleep(0.5); session=frida.attach(proc.pid)
+            script=session.create_script(script_code); msgs=[]
+            script.on("message",lambda m,d: msgs.append(m)); script.load()
+            time.sleep(3); script.unload(); session.detach(); proc.terminate()
             log.info(f"Frida captured {len(msgs)} events")
-            for m in msgs[:20]:
-                log.debug(f"  Frida → {m.get('payload', m)}")
+            for m in msgs[:20]: log.debug(f"  Frida → {m.get('payload',m)}")
             return True
-        except Exception as e:
-            log.warning(f"Frida attach failed: {e}")
-            return False
+        except Exception as e: log.warning(f"Frida attach failed: {e}"); return False
 
-    # ────────────────────────────────────────────
-    # 5. Library offset loading
-    # ────────────────────────────────────────────
-
-    def load_library_offsets(self) -> tuple:
+    def load_library_offsets(self):
         log.info("Loading library offsets…")
-        base_addr = None
-
-        # Built-in offset table
-        LIBC_OFFSETS = {
-            "libc.so.6": {
-                "2.31": {"system": 0x055410, "binsh": 0x1B75AA, "execve": 0x0E6C70,
-                         "tcache": 0x1B2C40, "puts":  0x080ED0},
-                "2.35": {"system": 0x050D70, "binsh": 0x1B45BD, "execve": 0x0E63B0,
-                         "tcache": 0x219C80, "puts":  0x080E50},
-                "2.38": {"system": 0x054EF0, "binsh": 0x1BC351, "execve": 0x0EAEA0,
-                         "tcache": 0x21B2C0, "puts":  0x0849C0},
-                "2.39": {"system": 0x058740, "binsh": 0x1CB42F, "execve": 0x0F2C80,
-                         "tcache": 0x21D2C0, "puts":  0x088D90},
-            },
-        }
-
+        base_addr=None
+        LIBC_OFFSETS={"libc.so.6":{
+            "2.27":{"system":0x04F440,"binsh":0x1B3E1A,"execve":0x0E4E30,"puts":0x07D7C0,"tcache":0x3C4B20},
+            "2.31":{"system":0x055410,"binsh":0x1B75AA,"execve":0x0E6C70,"tcache":0x1B2C40,"puts":0x080ED0},
+            "2.35":{"system":0x050D70,"binsh":0x1B45BD,"execve":0x0E63B0,"tcache":0x219C80,"puts":0x080E50},
+            "2.38":{"system":0x054EF0,"binsh":0x1BC351,"execve":0x0EAEA0,"tcache":0x21B2C0,"puts":0x0849C0},
+            "2.39":{"system":0x058740,"binsh":0x1CB42F,"execve":0x0F2C80,"tcache":0x21D2C0,"puts":0x088D90},
+        }}
         try:
-            if self.platform in ("linux", "android"):
-                ldd_cmd = (
-                    ["adb", "shell", f"ldd {self.binary}"]
-                    if self.platform == "android"
-                    else ["ldd", self.binary]
-                )
+            if self.platform in ("linux","android"):
+                ldd_cmd=(["adb","shell",f"ldd {self.binary}"] if self.platform=="android"
+                         else ["ldd",self.binary])
+                try: ldd_out=subprocess.check_output(ldd_cmd,stderr=subprocess.DEVNULL).decode()
+                except: ldd_out=""
+                maps_cmd=(["adb","shell","cat /proc/1/maps"] if self.platform=="android"
+                          else ["cat",f"/proc/{os.getpid()}/maps"])
                 try:
-                    ldd_out = subprocess.check_output(
-                        ldd_cmd, stderr=subprocess.DEVNULL
-                    ).decode()
-                except Exception:
-                    ldd_out = ""
-
-                maps_cmd = (
-                    ["adb", "shell", "cat /proc/1/maps"]
-                    if self.platform == "android"
-                    else ["cat", f"/proc/{os.getpid()}/maps"]
-                )
-                try:
-                    maps = subprocess.check_output(
-                        maps_cmd, stderr=subprocess.DEVNULL
-                    ).decode()
+                    maps=subprocess.check_output(maps_cmd,stderr=subprocess.DEVNULL).decode()
                     for line in maps.splitlines():
                         if "libc" in line and "r-xp" in line:
-                            base_addr = int(line.split("-")[0], 16)
-                            log.info(f"libc base: {hex(base_addr)}")
-                            break
-                except Exception:
-                    pass
-
-            elif self.platform == "windows":
-                import pefile  # type: ignore
-                pe   = pefile.PE(self.binary)
-                dlls = [d.Name.decode() for d in pe.DIRECTORY_ENTRY_IMPORT]
+                            base_addr=int(line.split("-")[0],16); log.info(f"libc base: {hex(base_addr)}"); break
+                except: pass
+            elif self.platform=="windows":
+                import pefile; pe=pefile.PE(self.binary)
+                dlls=[d.Name.decode() for d in pe.DIRECTORY_ENTRY_IMPORT]
                 log.info(f"Imported DLLs: {dlls}")
-                return dlls[0] if dlls else None, "unknown", {}, None
-
-            version = self._detect_libc_version()
-            offsets = LIBC_OFFSETS.get("libc.so.6", {}).get(version, {})
+                return dlls[0] if dlls else None,"unknown",{},None
+            version=self._detect_libc_version()
+            offsets=LIBC_OFFSETS.get("libc.so.6",{}).get(version,{})
             if offsets:
                 log.info(f"Loaded libc offsets for v{version}: {list(offsets.keys())}")
-                return "libc.so.6", version, offsets, base_addr
-
-            log.warning("No built-in offsets for detected libc version")
-            return None, None, {}, base_addr
-
+                return "libc.so.6",version,offsets,base_addr
+            log.warning(f"No built-in offsets for libc {version} — use query_libc_rip() after leaking")
+            return "libc.so.6",version,{},base_addr
         except Exception as e:
-            log.warning(f"Library offset loading failed: {e}")
-            return None, None, {}, None
+            log.warning(f"Library offset loading failed: {e}"); return None,None,{},None
 
-    def _detect_libc_version(self) -> str:
+    def _detect_libc_version(self):
         try:
-            out = subprocess.check_output(
-                ["ldd", "--version"], stderr=subprocess.STDOUT
-            ).decode()
-            m = re.search(r"(\d+\.\d+)", out)
-            if m:
-                return m.group(1)
-        except Exception:
-            pass
+            out=subprocess.check_output(["ldd","--version"],stderr=subprocess.STDOUT).decode()
+            m=re.search(r"(\d+\.\d+)",out)
+            if m: return m.group(1)
+        except: pass
         return "2.31"
 
-    # ────────────────────────────────────────────
-    # 6. Rust / Agave unsafe grep
-    # ────────────────────────────────────────────
-
-    def grep_unsafe_source(self, source_path: str) -> list:
-        log.info(f"Grepping Rust source in {source_path} for 'unsafe'…")
-        unsafe_files = []
-        unsafe_total = 0
+    def query_libc_rip(self,leaked_addr,symbol="puts"):
+        log.info(f"Querying libc.rip: {symbol} leaked @ {hex(leaked_addr)}…")
+        page_offset=hex(leaked_addr&0xfff)
+        url=f"https://libc.rip/api/v1/find?symbols={symbol}={page_offset}"
         try:
-            for root, _, files in os.walk(source_path):
-                for fname in files:
-                    if not fname.endswith(".rs"):
-                        continue
-                    fpath = os.path.join(root, fname)
-                    try:
-                        content = open(fpath, encoding="utf-8", errors="ignore").read()
-                        n = content.count("unsafe")
-                        if n:
-                            unsafe_total += n
-                            unsafe_files.append(fpath)
-                            log.debug(f"  {fpath}: {n} unsafe block(s)")
-                    except OSError:
-                        pass
-            log.info(f"unsafe occurrences: {unsafe_total} in {len(unsafe_files)} files")
-            return unsafe_files
+            req=urllib.request.Request(url,headers={"User-Agent":"BinSmasher/4"})
+            with urllib.request.urlopen(req,timeout=10) as resp:
+                results=json.loads(resp.read())
+        except urllib.error.URLError as e:
+            log.warning(f"libc.rip unreachable: {e}"); return {}
         except Exception as e:
-            log.error(f"Source grep failed: {e}")
-            return []
+            log.error(f"libc.rip error: {e}"); return {}
+        if not results:
+            log.warning(f"libc.rip: no match for {symbol}+{page_offset}"); return {}
+        best=results[0]
+        log.info(f"libc.rip match: {best.get('id','unknown')} ({len(results)} candidates)")
+        sym_offset=int(best["symbols"][symbol],16); libc_base=leaked_addr-sym_offset
+        absolute={"__libc_base__":libc_base,"id":best.get("id","unknown")}
+        for name,off_str in best["symbols"].items():
+            try: absolute[name]=libc_base+int(off_str,16)
+            except: pass
+        log.info(f"libc base: {hex(libc_base)}  system: {hex(absolute.get('system',0))}")
+        return absolute
+
+    def detect_seccomp(self):
+        log.info("Detecting seccomp filters…")
+        result={"enabled":False,"rules":[],"orw_needed":False,"allowed":[],"blocked":[]}
+        import shutil
+        if not shutil.which("seccomp-tools"):
+            log.warning("seccomp-tools not installed: gem install seccomp-tools"); return result
+        try:
+            out=subprocess.check_output(["seccomp-tools","dump",self.binary],
+                                         stderr=subprocess.DEVNULL,timeout=12).decode(errors="ignore")
+            if not out.strip(): return result
+            result["enabled"]=True; result["rules"]=out.strip().splitlines()
+            for line in result["rules"]:
+                low=line.lower(); m=re.search(r"sys_(\w+)",line); name=m.group(1) if m else None
+                if "allow" in low and name: result["allowed"].append(name)
+                elif ("kill" in low or "errno" in low or "trap" in low) and name:
+                    result["blocked"].append(name)
+            result["orw_needed"]=("execve" in result["blocked"] or
+                (bool(result["allowed"]) and "execve" not in result["allowed"]))
+            log.info(f"seccomp: enabled={result['enabled']} orw_needed={result['orw_needed']}")
+        except subprocess.TimeoutExpired: log.warning("seccomp-tools timed out")
+        except Exception as e: log.warning(f"seccomp detection failed: {e}")
+        return result
+
+    def patch_binary_for_local(self,libc_path,ld_path=""):
+        import shutil as _sh
+        if _sh.which("pwninit"):
+            cmd=["pwninit","--bin",self.binary,"--libc",libc_path,"--no-template"]
+            if ld_path: cmd+=["--ld",ld_path]
+            try:
+                subprocess.run(cmd,check=True,timeout=30,
+                               stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                candidate=self.binary+"_patched"
+                if os.path.isfile(candidate): log.info(f"pwninit: {candidate}"); return candidate
+            except Exception as e: log.warning(f"pwninit failed: {e}")
+        if _sh.which("patchelf"):
+            patched=self.binary+"_patched"
+            try:
+                _sh.copy2(self.binary,patched)
+                interp=ld_path or "/lib64/ld-linux-x86-64.so.2"
+                rpath=os.path.dirname(os.path.abspath(libc_path))
+                subprocess.run(["patchelf","--set-interpreter",interp,"--set-rpath",rpath,patched],
+                               check=True,timeout=15,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                log.info(f"patchelf: {patched}"); return patched
+            except Exception as e: log.error(f"patchelf failed: {e}")
+        else: log.warning("Neither pwninit nor patchelf found")
+        return self.binary
+
+    def recover_functions_stripped(self):
+        log.info("Recovering functions from stripped binary…")
+        recovered=[]
+        try:
+            out=subprocess.check_output(["r2","-A","-q","-c","aaa; aac; aan; aflj",self.binary],
+                                         stderr=subprocess.DEVNULL,timeout=60).decode(errors="ignore")
+            try:
+                for fn in json.loads(out): recovered.append((fn.get("offset",0),fn.get("name","unknown")))
+            except:
+                for line in out.splitlines():
+                    m=re.match(r"(0x[0-9a-fA-F]+)",line)
+                    if m: recovered.append((int(m.group(1),16),f"fcn_{m.group(1)}"))
+        except Exception as e: log.warning(f"  r2 stripped: {e}")
+        try:
+            data=open(self.binary,"rb").read(); prologue=b"\x55\x48\x89\xE5"; idx=0
+            while True:
+                idx=data.find(prologue,idx)
+                if idx==-1: break
+                if not any(a==idx for a,_ in recovered): recovered.append((idx,f"prologue_{hex(idx)}"))
+                idx+=4
+        except Exception as e: log.warning(f"  prologue scan: {e}")
+        try:
+            import angr
+            proj=angr.Project(self.binary,auto_load_libs=False); cfg=proj.analyses.CFGFast()
+            for addr,fn in list(cfg.functions.items())[:50]:
+                if not any(a==addr for a,_ in recovered):
+                    recovered.append((addr,fn.name or f"angr_{hex(addr)}"))
+        except ImportError: pass
+        except Exception as e: log.warning(f"  angr: {e}")
+        log.info(f"Stripped: {len(recovered)} candidates"); return recovered
+
+    def mte_info(self):
+        from pwn import context
+        info={"mte_detected":False,"arch":context.arch,"bypass_hint":"N/A"}
+        if context.arch not in ("aarch64",):
+            info["bypass_hint"]="MTE is ARM64-only"; return info
+        try:
+            re_out=subprocess.check_output(["readelf","-d",self.binary],stderr=subprocess.DEVNULL).decode(errors="ignore")
+            nm_out=subprocess.check_output(["nm",self.binary],stderr=subprocess.DEVNULL).decode(errors="ignore")
+            if "memtag" in re_out.lower() or "__hwasan" in nm_out.lower():
+                info["mte_detected"]=True
+                info["bypass_hint"]="MTE: (1) brute 16 tags, (2) %p leak tag nibble, (3) mmap no PROT_MTE"
+        except Exception as e: log.warning(f"MTE: {e}")
+        return info
+
+    def grep_unsafe_source(self,source_path):
+        log.info(f"Grepping Rust source in {source_path} for 'unsafe'…")
+        unsafe_files=[]; unsafe_total=0
+        try:
+            for root,_,files in os.walk(source_path):
+                for fname in files:
+                    if not fname.endswith(".rs"): continue
+                    fpath=os.path.join(root,fname)
+                    try:
+                        content=open(fpath,encoding="utf-8",errors="ignore").read()
+                        n=content.count("unsafe")
+                        if n: unsafe_total+=n; unsafe_files.append(fpath); log.debug(f"  {fpath}: {n}")
+                    except OSError: pass
+            log.info(f"unsafe: {unsafe_total} in {len(unsafe_files)} files"); return unsafe_files
+        except Exception as e: log.error(f"Source grep: {e}"); return []
