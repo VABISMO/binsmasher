@@ -71,6 +71,13 @@ def build_parser():
     adv.add_argument("--safeseh-bypass",      action="store_true", help="SafeSEH bypass (Windows)")
     adv.add_argument("--privilege-escalation",action="store_true", help="Post-exploit privesc")
     adv.add_argument("--cfi-bypass",          action="store_true", help="CFI valid-target pivot")
+    adv.add_argument("--stack-pivot",         action="store_true", dest="stack_pivot",
+                     help="Build stack pivot chain (leave;ret gadget)")
+    adv.add_argument("--largebin-attack",     action="store_true", dest="largebin",
+                     help="Largebin attack for glibc heap exploitation")
+    adv.add_argument("--gdb-mode",  default="pwndbg",
+                     choices=["pwndbg","peda","vanilla"], dest="gdb_mode",
+                     help="GDB script flavour for --generate-scripts (default: pwndbg)")
     adv.add_argument("--srop",  dest="force_srop", action="store_true",
                      help="Force Sigreturn-Oriented Programming chain")
     adv.add_argument("--orw",   dest="force_orw",  action="store_true",
@@ -226,6 +233,18 @@ def run_binary(cfg):
         crash_script   = exploiter.generate_crash_script(offset, cfg.binary)
         exploit_script = exploiter.generate_exploit_script(offset, canary, base_addr, offsets,
                                                             exploit_type=exploit_type, binary_path=cfg.binary)
+        # GDB helper script (pwndbg/peda/vanilla)
+        try:
+            from pwn import ELF as _e2
+            _elf2 = _e2(cfg.binary, checksec=False)
+            _WKW  = ["win","flag","shell","backdoor","secret","easy","print_flag","cat_flag"]
+            _win  = next((_a for _n,_a in _elf2.symbols.items()
+                          if _a and any(kw==_n.lower() or _n.lower().startswith(kw) for kw in _WKW)), 0)
+            gdb_f = fuzzer.generate_gdb_script(cfg.binary, offset, win_addr=_win,
+                                                mode=getattr(cfg,"gdb_mode","pwndbg"))
+            log.info(f"GDB script: {gdb_f}")
+        except Exception as _ge:
+            log.debug(f"GDB script: {_ge}")
         log.info(f"Scripts written: {crash_script}, {exploit_script}")
 
     if success: suggestions.append("Exploit sent — verify output on your listener")

