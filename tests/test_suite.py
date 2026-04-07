@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BinSmasher realtest v6 — complete integration test suite.
+BinSmasher realtest — complete integration test suite.
 
 All test categories:
   CTF      downloaded nightmare CTF binaries
@@ -565,7 +565,7 @@ def print_summary() -> None:
     console.rule("[bold white]FINAL RESULTS[/]", style="white")
     counts = {PASS:0, FAIL:0, WARN:0, SKIP:0}
     tbl = Table(show_header=True, header_style="bold cyan",
-                title="[bold]BinSmasher v6 — Test Results[/]",
+                title="[bold]BinSmasher — Test Results[/]",
                 min_width=110, pad_edge=True, show_lines=False)
     tbl.add_column(" ", width=2, no_wrap=True)
     tbl.add_column("Status", width=7, no_wrap=True)
@@ -595,7 +595,7 @@ def print_summary() -> None:
 
 def main() -> None:
     import argparse
-    ap = argparse.ArgumentParser(description="BinSmasher realtest v6")
+    ap = argparse.ArgumentParser(description="BinSmasher realtest")
     ap.add_argument("--ctf-only",    action="store_true")
     ap.add_argument("--local-only",  action="store_true")
     ap.add_argument("--no-download", action="store_true")
@@ -615,10 +615,10 @@ def main() -> None:
         pass  # not writable — that's ok, RLIMIT_CORE=0 handles it
 
     console.print(Panel(
-        "[bold cyan]BinSmasher[/] realtest [bold]v6[/]\n"
+        "[bold cyan]BinSmasher[/] test\n"
         "[dim]PASS=working  WARN=partial/expected  FAIL=broken  SKIP=binary missing[/]\n"
         "[dim]All local bins: stdin/stdout via socat fork. win() in every binary.[/]",
-        title="[bold]🔨 realtest v6[/]", border_style="cyan", width=80))
+        title="[bold]🔨 test [/]", border_style="cyan", width=80))
 
     run_ctf   = not args.local_only
     run_local = not args.ctf_only
