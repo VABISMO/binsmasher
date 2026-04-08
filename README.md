@@ -668,6 +668,103 @@ sudo apt install wine wine64
 
 ---
 
+## CVE Scanner 
+
+<img width="1770" height="942" alt="image" src="https://github.com/user-attachments/assets/feacfd20-d743-4e29-96c4-42f9148ab327" />
+
+**Static-only binary vulnerability scanner for responsible disclosure.**
+
+BinSmasher performs automated static analysis on Linux ELF binaries, identifies dangerous function calls (buffer overflows, format-string vulnerabilities, command injection, etc.), applies data-flow taint analysis to determine exploitability, and generates ready-to-submit MITRE CVE records, interactive HTML reports, and structured JSON exports.
+
+---
+
+### Features
+
+- **Comprehensive vulnerability catalogue** — detects 25+ dangerous libc functions (`gets`, `strcpy`, `system`, `printf`, `recv`, `sprintf`, etc.)
+- **Static taint analysis** — determines `CONFIRMED` / `PROBABLE` / `UNCONFIRMED` confidence using call-graph BFS + argument-register heuristics
+- **Binary protection detection** — NX/DEP, PIE, stack canaries, RELRO, FORTIFY, Shadow Stack, ASLR
+- **Risk scoring** — CVSS-adjusted scoring with severity classification (Critical / High / Medium / Low)
+- **Multiple export formats**:
+  - Interactive HTML report (searchable, filterable table + charts)
+  - `cve_audit_all_*.json` — all findings
+  - `cve_audit_confirmed_high_*.json` — CONFIRMED + High/Critical only
+  - `cve_audit_probable_high_*.json` — PROBABLE + High/Critical only
+  - MITRE CVE submission templates (Markdown)
+- **No dependencies beyond standard Linux tools** (`objdump`, `readelf`, `nm`, `strings`, `checksec` optional)
+- **Single-binary or directory scanning mode**
+
+---
+
+### Installation
+
+```bash
+
+cd cve_scanner
+
+# Make the scanner executable (optional)
+chmod +x cve_scan.py
+
+# Ensure required system tools are installed
+sudo apt install binutils coreutils checksec  # Debian/Ubuntu
+# or
+sudo dnf install binutils checksec            # Fedora/RHEL
+```
+
+### Usage
+
+#### Basic scan (default: `/usr/bin`)
+
+```bash
+python3 cve_scan.py
+```
+
+### Scan a specific directory or multiple paths
+
+```Bash
+python3 cve_scan.py /usr/sbin /opt/binaries
+```
+
+### Audit a single binary
+
+```python3 cve_scan.py --single /tmp/vuln_test```
+
+### Advanced options
+
+```bash
+Bashpython3 cve_scan.py \
+  --single ./target/binary \
+  --output-dir ./my_reports \
+  --threshold 100 \
+  --confidence CONFIRMED \
+  --no-taint \
+  --verbose
+```
+
+### Command-line arguments
+
+
+| Argument           | Description                                      | Default                  |
+|--------------------|--------------------------------------------------|--------------------------|
+| `paths`            | Directories or files to scan                     | `/usr/bin`               |
+| `-o, --output-dir` | Output directory                                 | `./cve_reports`          |
+| `--threshold`      | Minimum risk score to report                     | `50`                     |
+| `--confidence`     | Minimum confidence (`CONFIRMED`/`PROBABLE`)      | `PROBABLE`               |
+| `--no-taint`       | Disable taint analysis                           | Enabled                  |
+| `--no-html`        | Skip HTML report generation                      | HTML enabled             |
+| `-v, --verbose`    | Enable debug logging                             | Off                      |
+
+
+## Contributing
+
+Contributions are welcome. Please open an issue or submit a pull request.
+
+Areas for improvement:
+
+Support for additional architectures
+More sophisticated taint propagation
+AI - BinSmasher Agent 
+Docker container for easy deployment
+
 ## Donations
 
 ETH — `0xD773B73C7ea4862020b7B5B58f31Ea491f5a9bA3`
@@ -678,8 +775,10 @@ SOL — `GYBiTvVbPvPJP7ZK5oaqc9w6UtHvd6NkhSPP2UBhDvfh`
 
 ## Authors 
 
-V.Nos - Cryptocalypse
+AncientEncoder 
 
 A.Canto - InsecureWorld
+
+V.Nos - Cryptocalypse
 
 BinSmasher Team
