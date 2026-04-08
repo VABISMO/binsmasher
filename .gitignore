@@ -11,3 +11,4 @@ test_pwn/
 test_pwn/*
 cve_reports/
 cve_reports/*
+binsmasher.log
