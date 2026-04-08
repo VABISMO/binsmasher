@@ -1,5 +1,5 @@
 set pagination off
-file /home/cryptocalypse/Downloads/binsmasher_v7 (4)/v7/tests/bins/t10_safestack
+file /home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/t_revshell
 break _dl_relocate_static_pie
 run 
 continue

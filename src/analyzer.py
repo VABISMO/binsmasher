@@ -43,7 +43,16 @@ class BinaryAnalyzer:
             log.error("`file` command not found."); raise SystemExit(1)
         platform, arch = "linux", "amd64"
         if "elf" in result:
-            platform = "android" if "arm" in result else "linux"
+            # Detect Android by ELF interpreter path, not just architecture
+            try:
+                interp_out = subprocess.check_output(
+                    ["readelf", "-l", self.binary], stderr=subprocess.DEVNULL
+                ).decode(errors="ignore")
+                is_android = ("/system/bin/linker" in interp_out
+                              or "/system/bin/linker64" in interp_out)
+            except Exception:
+                is_android = False
+            platform = "android" if is_android else "linux"
             if "32-bit" in result:   arch = "arm" if "arm" in result else "i386"
             elif "64-bit" in result: arch = "aarch64" if "aarch64" in result else "amd64"
         elif "pe32+" in result: platform, arch = "windows","amd64"
@@ -287,36 +296,112 @@ targets.forEach(function(fn){
                          else ["ldd",self.binary])
                 try: ldd_out=subprocess.check_output(ldd_cmd,stderr=subprocess.DEVNULL).decode()
                 except: ldd_out=""
-                maps_cmd=(["adb","shell","cat /proc/1/maps"] if self.platform=="android"
-                          else ["cat",f"/proc/{os.getpid()}/maps"])
                 try:
-                    maps=subprocess.check_output(maps_cmd,stderr=subprocess.DEVNULL).decode()
-                    for line in maps.splitlines():
-                        if "libc" in line and "r-xp" in line:
-                            base_addr=int(line.split("-")[0],16); log.info(f"libc base: {hex(base_addr)}"); break
-                except: pass
+                    if self.platform == "android":
+                        maps_out = subprocess.check_output(
+                            ["adb","shell","cat /proc/1/maps"], stderr=subprocess.DEVNULL
+                        ).decode()
+                        for line in maps_out.splitlines():
+                            if "libc" in line and "r-xp" in line:
+                                base_addr = int(line.split("-")[0], 16)
+                                log.info(f"libc base (adb): {hex(base_addr)}"); break
+                    else:
+                        ldd_map = subprocess.check_output(
+                            ["ldd", self.binary], stderr=subprocess.DEVNULL
+                        ).decode()
+                        for line in ldd_map.splitlines():
+                            if "libc" in line:
+                                m = re.search(r"=>\s+\S+\s+\((0x[0-9a-fA-F]+)\)", line)
+                                if m:
+                                    base_addr = int(m.group(1), 16)
+                                    log.info(f"libc base (ldd): {hex(base_addr)}"); break
+                except Exception: pass
             elif self.platform=="windows":
                 import pefile; pe=pefile.PE(self.binary)
                 dlls=[d.Name.decode() for d in pe.DIRECTORY_ENTRY_IMPORT]
                 log.info(f"Imported DLLs: {dlls}")
                 return dlls[0] if dlls else None,"unknown",{},None
-            version=self._detect_libc_version()
-            offsets=LIBC_OFFSETS.get("libc.so.6",{}).get(version,{})
+            version, libc_path = self._detect_libc_version()
+            offsets = LIBC_OFFSETS.get("libc.so.6", {}).get(version, {}) if version else {}
             if offsets:
                 log.info(f"Loaded libc offsets for v{version}: {list(offsets.keys())}")
-                return "libc.so.6",version,offsets,base_addr
-            log.warning(f"No built-in offsets for libc {version} — use query_libc_rip() after leaking")
-            return "libc.so.6",version,{},base_addr
+                return "libc.so.6", version, offsets, base_addr
+            # Not in built-in table: extract from real libc binary on disk
+            if libc_path and os.path.isfile(libc_path):
+                extracted = self._extract_offsets_from_libc(libc_path)
+                if extracted:
+                    log.info(f"Extracted {len(extracted)} offsets from {libc_path}")
+                    return "libc.so.6", version or "unknown", extracted, base_addr
+            version_str = version or "unknown"
+            log.warning(f"No built-in offsets for libc {version_str} — will query libc.rip after leak")
+            return "libc.so.6", version_str, {}, base_addr
         except Exception as e:
             log.warning(f"Library offset loading failed: {e}"); return None,None,{},None
 
     def _detect_libc_version(self):
+        """Returns (version_str, libc_path) or (None, None) if detection fails."""
+        # Strategy 1: read version from the libc linked to the target binary
         try:
-            out=subprocess.check_output(["ldd","--version"],stderr=subprocess.STDOUT).decode()
-            m=re.search(r"(\d+\.\d+)",out)
-            if m: return m.group(1)
-        except: pass
-        return "2.31"
+            ldd_out = subprocess.check_output(
+                ["ldd", self.binary], stderr=subprocess.DEVNULL
+            ).decode()
+            for line in ldd_out.splitlines():
+                if "libc" in line:
+                    m = re.search(r"=>\s+(/\S+libc[^\s]*)", line)
+                    if m:
+                        libc_path = m.group(1)
+                        vm = re.search(r"libc-(\d+\.\d+)\.so", libc_path)
+                        if not vm:
+                            try:
+                                sv = subprocess.check_output(
+                                    ["strings", libc_path], stderr=subprocess.DEVNULL
+                                ).decode(errors="ignore")
+                                vm = re.search(r"GNU C Library.*?release version (\d+\.\d+)", sv)
+                            except Exception: pass
+                        if vm:
+                            log.info(f"libc version from target: {vm.group(1)} ({libc_path})")
+                            return vm.group(1), libc_path
+                        return None, libc_path  # path found but version unknown
+        except Exception: pass
+        # Strategy 2: host ldd --version
+        try:
+            out = subprocess.check_output(["ldd","--version"],stderr=subprocess.STDOUT).decode()
+            m = re.search(r"(\d+\.\d+)", out)
+            if m:
+                log.info(f"libc version from host ldd: {m.group(1)}")
+                return m.group(1), None
+        except Exception: pass
+        log.warning("Could not detect libc version — offsets will be fetched from libc.rip after leak")
+        return None, None
+
+    def _extract_offsets_from_libc(self, libc_path):
+        """Extract symbol offsets from a real libc binary using nm."""
+        offsets = {}
+        symbols_wanted = {"system","execve","puts","printf","open","read","write","__libc_system"}
+        try:
+            nm_out = subprocess.check_output(
+                ["nm","-D","--defined-only", libc_path], stderr=subprocess.DEVNULL
+            ).decode(errors="ignore")
+            for line in nm_out.splitlines():
+                parts = line.split()
+                if len(parts) >= 3 and parts[1] in ("T","W"):
+                    name = parts[2]
+                    if name in symbols_wanted:
+                        try: offsets[name] = int(parts[0], 16)
+                        except ValueError: pass
+        except Exception as e: log.debug(f"nm libc extraction: {e}")
+        try:
+            st = subprocess.check_output(
+                ["strings","-t","x", libc_path], stderr=subprocess.DEVNULL
+            ).decode(errors="ignore")
+            for line in st.splitlines():
+                if line.strip().endswith("/bin/sh"):
+                    m = re.match(r"\s*([0-9a-fA-F]+)\s+/bin/sh", line)
+                    if m: offsets["binsh"] = int(m.group(1), 16); break
+        except Exception as e: log.debug(f"strings /bin/sh: {e}")
+        if "system" not in offsets and "__libc_system" in offsets:
+            offsets["system"] = offsets["__libc_system"]
+        return offsets
 
     def query_libc_rip(self,leaked_addr,symbol="puts"):
         log.info(f"Querying libc.rip: {symbol} leaked @ {hex(leaked_addr)}…")
@@ -380,9 +465,16 @@ targets.forEach(function(fn){
             patched=self.binary+"_patched"
             try:
                 _sh.copy2(self.binary,patched)
-                interp=ld_path or "/lib64/ld-linux-x86-64.so.2"
+                if not ld_path:
+                    arch_interp = {
+                        "amd64":   "/lib64/ld-linux-x86-64.so.2",
+                        "i386":    "/lib/ld-linux.so.2",
+                        "arm":     "/lib/ld-linux-armhf.so.3",
+                        "aarch64": "/lib/ld-linux-aarch64.so.1",
+                    }
+                    ld_path = arch_interp.get(self.arch, "/lib64/ld-linux-x86-64.so.2")
                 rpath=os.path.dirname(os.path.abspath(libc_path))
-                subprocess.run(["patchelf","--set-interpreter",interp,"--set-rpath",rpath,patched],
+                subprocess.run(["patchelf","--set-interpreter",ld_path,"--set-rpath",rpath,patched],
                                check=True,timeout=15,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                 log.info(f"patchelf: {patched}"); return patched
             except Exception as e: log.error(f"patchelf failed: {e}")
@@ -403,12 +495,22 @@ targets.forEach(function(fn){
                     if m: recovered.append((int(m.group(1),16),f"fcn_{m.group(1)}"))
         except Exception as e: log.warning(f"  r2 stripped: {e}")
         try:
-            data=open(self.binary,"rb").read(); prologue=b"\x55\x48\x89\xE5"; idx=0
-            while True:
-                idx=data.find(prologue,idx)
-                if idx==-1: break
-                if not any(a==idx for a,_ in recovered): recovered.append((idx,f"prologue_{hex(idx)}"))
-                idx+=4
+            arch_prologues = {
+                "amd64":   [b"\x55\x48\x89\xE5", b"\x55\x48\x8B\xEC"],
+                "i386":    [b"\x55\x89\xE5",       b"\x55\x89\xEC"],
+                "arm":     [b"\x00\x48\x2D\xE9",  b"\xF0\x4F\x2D\xE9"],
+                "aarch64": [b"\xFF\x03\x01\xD1",  b"\xFD\x7B\xBF\xA9"],
+            }
+            prologues = arch_prologues.get(self.arch, arch_prologues["amd64"])
+            data = open(self.binary,"rb").read()
+            for prologue in prologues:
+                idx = 0
+                while True:
+                    idx = data.find(prologue, idx)
+                    if idx == -1: break
+                    if not any(a==idx for a,_ in recovered):
+                        recovered.append((idx, f"prologue_{hex(idx)}"))
+                    idx += len(prologue)
         except Exception as e: log.warning(f"  prologue scan: {e}")
         try:
             import angr
