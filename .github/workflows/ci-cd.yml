@@ -62,7 +62,9 @@ jobs:
         run: |
           source .venv/bin/activate
           python3 tests/test_suite.py
-
+          chmod +x tests/hermes_blockchain.sh
+          tests/hermes_blockchain.sh
+          
       - name: Summary
         if: always()
         run: |
