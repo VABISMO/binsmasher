@@ -68,6 +68,11 @@ class ExploitConfig:
     flag_path: str = "/flag"
     dos_only: bool = False
     generate_scripts: bool = False
+    # v4.1 – custom raw payload sender
+    payload_data: Optional[str] = None
+    udp: bool = False
+    # v4.2 – spawn & manage the target process for UDP crash detection
+    spawn_target: bool = False
 
     def validate(self) -> None:
         if not os.path.isfile(self.binary):
@@ -98,14 +103,7 @@ class RichHelpFormatter(HelpFormatter):
 
 def print_summary(offset, stack_addr, return_addr, exploit_type,
                   status, canary, target_function, suggestions: list,
-                  # static protection flags from check_protections()
                   nx=None, pie=None, relro=None, canary_enabled=None, aslr=None) -> None:
-    """Print the exploitation results table.
-
-    Stack Address / Canary show runtime-leaked values (need GDB or fmt-string oracle).
-    Return Address shows the win() function address when available.
-    Binary protections (NX, PIE, RELRO, Canary) always show from static checksec.
-    """
     def _bool(v, yes="Enabled", no="Disabled"):
         if v is None: return "—"
         return f"[red]{yes}[/]" if v else f"[green]{no}[/]"
@@ -115,7 +113,6 @@ def print_summary(offset, stack_addr, return_addr, exploit_type,
     table.add_column("Property", style="bold cyan", min_width=24, no_wrap=True)
     table.add_column("Value", min_width=24)
 
-    # ── Exploit results ───────────────────────────────────────────────────────
     table.add_row("Offset", str(offset) if offset is not None else "N/A")
     table.add_row("Stack Address",
                   hex(stack_addr) if stack_addr else "[dim]N/A  (needs GDB or fmt-string leak)[/]")
@@ -128,7 +125,6 @@ def print_summary(offset, stack_addr, return_addr, exploit_type,
     table.add_row("Exploit Type", exploit_type or "N/A")
     table.add_row("Target Function", target_function or "N/A")
 
-    # ── Binary protections (static) ───────────────────────────────────────────
     table.add_section()
     if nx is not None:
         table.add_row("NX  (no-exec stack)", _bool(nx, yes="ON — shellcode blocked", no="OFF — shellcode OK"))
@@ -145,7 +141,6 @@ def print_summary(offset, stack_addr, return_addr, exploit_type,
     if aslr is not None:
         table.add_row("ASLR  (system)", _bool(aslr, yes="ON", no="OFF"))
 
-    # ── Final status ──────────────────────────────────────────────────────────
     table.add_section()
     table.add_row("Status",
                   f"[bold green]  ✓  {status}[/]" if status == "Success"
