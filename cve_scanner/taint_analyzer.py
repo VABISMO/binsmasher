@@ -68,7 +68,8 @@ class FastCallGraph:
         self._built = False
 
     def build(self) -> bool:
-        out = _run(["objdump", "-d", "--wide", self.binary])
+        # Use cached output if set by TaintAnalyzer (avoids redundant disassembly)
+        out = getattr(self, "_cached_objdump", None) or _run(["objdump", "-d", "--wide", self.binary])
         if not out:
             log.debug("objdump produced no output — skipping call-graph")
             return False
@@ -164,8 +165,9 @@ class ArgFlow:
         """
         Returns (tainted: bool, reason: str).
         Looks at the 20 instructions preceding the call site.
+        Uses cached objdump output if set by TaintAnalyzer.
         """
-        out = _run(["objdump", "-d", "--wide", self.binary])
+        out = getattr(self, "_cached_objdump", None) or _run(["objdump", "-d", "--wide", self.binary])
         if not out:
             return True, "objdump unavailable — assuming tainted args"
 
@@ -217,13 +219,19 @@ class ArgFlow:
 
 class TaintAnalyzer:
     def __init__(self, binary: str, arch: str, bits: int) -> None:
-        self.binary = binary
-        self.cg     = FastCallGraph(binary)
-        self.af     = ArgFlow(binary, bits)
-        self._built = False
+        self.binary  = binary
+        # Cache full objdump output so both CallGraph and ArgFlow share ONE disassembly
+        self._objdump_cache: str = ""
+        self.cg      = FastCallGraph(binary)
+        self.af      = ArgFlow(binary, bits)
+        self._built  = False
 
     def _ensure_built(self) -> None:
         if not self._built:
+            # Run objdump ONCE and share the output with both sub-analyzers
+            self._objdump_cache = _run(["objdump", "-d", "--wide", self.binary])
+            self.cg._cached_objdump = self._objdump_cache
+            self.af._cached_objdump = self._objdump_cache
             self.cg.build()
             self._built = True
 

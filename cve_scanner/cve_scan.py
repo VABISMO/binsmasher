@@ -149,8 +149,15 @@ VULN_CATALOG = {
     # Dynamic loading
     "dlopen":   ("DynamicLoad",      "CWE-114", "dlopen() — dynamic library injection",                            8.5),
     # Privilege
-    "setuid":   ("PrivEsc",          "CWE-250", "setuid() — privilege manipulation",                               8.8),
-    "setgid":   ("PrivEsc",          "CWE-250", "setgid() — privilege manipulation",                               8.5),
+    "setuid":   ("PrivEsc",          "CWE-250",
+               "setuid() — privilege manipulation. NOTE: may be legitimate "
+               "privilege dropping (setuid(nobody)) — verify the argument. "
+               "Only a vulnerability if called with uid=0 or attacker-controlled arg.",
+               8.8),
+    "setgid":   ("PrivEsc",          "CWE-250",
+               "setgid() — privilege manipulation. NOTE: may be legitimate "
+               "privilege dropping — verify the argument.",
+               8.5),
 }
 
 SEVERITY_THRESHOLDS = [
@@ -281,9 +288,13 @@ def check_protections(path: str, platform: str) -> dict:
     )
 
     # RELRO
-    if "BIND_NOW" in dyn and "GNU_RELRO" in dyn:
+    # GNU_RELRO appears in PROGRAM HEADERS (readelf -l → stored in `ph`),
+    # NOT in the dynamic section (readelf -d → stored in `dyn`).
+    # Full RELRO = GNU_RELRO in program headers AND BIND_NOW in dynamic section.
+    # Partial RELRO = GNU_RELRO in program headers only.
+    if "GNU_RELRO" in ph and "BIND_NOW" in dyn:
         result["relro"] = "Full"
-    elif "GNU_RELRO" in dyn:
+    elif "GNU_RELRO" in ph:
         result["relro"] = "Partial"
 
     # FORTIFY
@@ -349,9 +360,19 @@ def get_strings_of_interest(path: str) -> list[str]:
     return list(dict.fromkeys(found))[:50]
 
 
+# Module-level disassembly cache keyed by binary path — avoids repeated objdump calls
+_DISASM_CACHE: dict = {}
+
+def _get_disasm(path: str) -> str:
+    """Return cached objdump output for path, running it once if needed."""
+    if path not in _DISASM_CACHE:
+        _DISASM_CACHE[path] = _run(["objdump", "-d", "--wide", path])
+    return _DISASM_CACHE[path]
+
+
 def find_vuln_addresses(path: str, fn_name: str) -> list[str]:
     addrs = []
-    out   = _run(["objdump", "-d", "--wide", path])
+    out   = _get_disasm(path)
     pat   = re.compile(
         r"^\s*([0-9a-f]+):\s+.*<" + re.escape(fn_name) + r"(?:@plt|@got)?>",
         re.MULTILINE
@@ -376,7 +397,7 @@ def suid_sgid_check(path: str) -> tuple[bool, bool, str, str]:
 
 
 def get_disasm_context(path: str, fn: str) -> list[str]:
-    """Try radare2, fall back to objdump snippet."""
+    """Try radare2, fall back to cached objdump snippet."""
     if shutil.which("r2"):
         cmd = f"aaa; axt sym.imp.{fn}~[0]"
         out = _run(["r2", "-q", "-e", "scr.color=false", "-c", cmd, path], timeout=25)
@@ -384,8 +405,8 @@ def get_disasm_context(path: str, fn: str) -> list[str]:
         if lines:
             return lines
 
-    # Fallback: objdump snippet around call site
-    out   = _run(["objdump", "-d", "--wide", path])
+    # Fallback: use cached objdump (already run by find_vuln_addresses)
+    out   = _get_disasm(path)
     pat   = re.compile(r"^\s*([0-9a-f]+):\s+.*<" + re.escape(fn) + r"(?:@plt)?>", re.M)
     lines = []
     for m in pat.finditer(out):

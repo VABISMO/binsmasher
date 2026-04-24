@@ -4,6 +4,7 @@
    Compile: gcc -o t_shellexec t_shellexec.c -fno-stack-protector -no-pie -w */
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
 void win(void) {
     system("/bin/sh -c 'id; hostname'");
     fflush(NULL);

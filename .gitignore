@@ -1,6 +1,7 @@
 venv/
 venv/*
 venv
+boofuzz-results
 malicious.bin
 malicious.mp3
 malicious*
