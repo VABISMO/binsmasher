@@ -1,0 +1,169 @@
+"""
+Structured JSON output for BinSmasher results.
+Enables integration with CI/CD, reporting tools, and other frameworks.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+
+log = logging.getLogger("binsmasher")
+
+
+def build_result(
+    binary: str,
+    host: str,
+    port: int,
+    offset: int | None,
+    exploit_type: str | None,
+    status: str,
+    canary: int | None,
+    return_addr: int | None,
+    target_function: str | None,
+    nx: bool | None,
+    pie: bool | None,
+    aslr: bool | None,
+    relro: str | None,
+    canary_enabled: bool | None,
+    findings: dict | None,
+    libc_base: int | None,
+    offsets: dict | None,
+    suggestions: list[str] | None,
+    vuln_type: str | None = None,
+    generated_files: list[str] | None = None,
+    duration_sec: float | None = None,
+) -> dict:
+    """Build a structured result dictionary."""
+    return {
+        "meta": {
+            "tool": "BinSmasher",
+            "version": "4.2.0",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "duration_sec": round(duration_sec, 2) if duration_sec else None,
+        },
+        "target": {
+            "binary": os.path.abspath(binary) if binary else None,
+            "binary_name": os.path.basename(binary) if binary else None,
+            "host": host,
+            "port": port,
+        },
+        "analysis": {
+            "vuln_type": vuln_type or "UNKNOWN",
+            "offset": offset,
+            "target_function": target_function,
+            "findings": findings or {},
+        },
+        "protections": {
+            "nx": nx,
+            "pie": pie,
+            "aslr": aslr,
+            "relro": relro,
+            "canary_enabled": canary_enabled,
+        },
+        "exploit": {
+            "type": exploit_type,
+            "status": status,
+            "success": status == "Success",
+            "canary": hex(canary) if canary else None,
+            "return_addr": hex(return_addr) if return_addr else None,
+            "libc_base": hex(libc_base) if libc_base else None,
+            "libc_offsets": (
+                {k: hex(v) if isinstance(v, int) else v
+                 for k, v in (offsets or {}).items()
+                 if k in ("system", "binsh", "execve", "puts",
+                          "__malloc_hook", "__free_hook", "one_gadget_0")}
+            ),
+        },
+        "output": {
+            "suggestions": suggestions or [],
+            "generated_files": generated_files or [],
+        },
+    }
+
+
+def write_json(result: dict, output_path: str | None = None,
+               binary_name: str = "result") -> str:
+    """Write result to JSON file. Returns the path."""
+    if output_path is None:
+        from utils._process import WORK_DIR
+        os.makedirs(WORK_DIR, exist_ok=True)
+        output_path = os.path.join(
+            WORK_DIR, f"binsmasher_{binary_name}_{int(time.time())}.json")
+
+    with open(output_path, "w") as f:
+        json.dump(result, f, indent=2, default=str)
+
+    log.info(f"[json] Result written to {output_path}")
+    return output_path
+
+
+def print_json(result: dict) -> None:
+    """Print result as formatted JSON to stdout."""
+    print(json.dumps(result, indent=2, default=str))
+
+
+def write_summary_markdown(result: dict, output_path: str | None = None) -> str:
+    """Write a Markdown summary for human consumption / GitHub issues."""
+    binary = result["target"]["binary_name"] or "unknown"
+    exploit = result["exploit"]
+    prot = result["protections"]
+    analysis = result["analysis"]
+
+    md = f"""# BinSmasher Report — `{binary}`
+
+**Status:** {'✅ Success' if exploit['success'] else '❌ Failed'}
+**Exploit type:** `{exploit['type'] or 'N/A'}`
+**Vuln type:** `{analysis['vuln_type']}`
+**Duration:** {result['meta'].get('duration_sec', '?')}s
+
+## Target
+- Binary: `{result['target']['binary']}`
+- Host: `{result['target']['host']}:{result['target']['port']}`
+
+## Analysis
+| Property | Value |
+|---|---|
+| Offset | `{analysis['offset']}` |
+| Target function | `{analysis['target_function']}` |
+| Canary | `{exploit['canary'] or 'N/A'}` |
+| Return address | `{exploit['return_addr'] or 'N/A'}` |
+
+## Protections
+| Protection | Status |
+|---|---|
+| NX | `{'ON' if prot['nx'] else 'OFF'}` |
+| PIE | `{'ON' if prot['pie'] else 'OFF'}` |
+| ASLR | `{'ON' if prot['aslr'] else 'OFF'}` |
+| RELRO | `{prot['relro'] or 'N/A'}` |
+| Canary | `{'ON' if prot['canary_enabled'] else 'OFF'}` |
+
+## Exploit
+```
+type:      {exploit['type']}
+libc_base: {exploit['libc_base'] or 'N/A'}
+system:    {exploit['libc_offsets'].get('system', 'N/A')}
+/bin/sh:   {exploit['libc_offsets'].get('binsh', 'N/A')}
+```
+
+## Suggestions
+{''.join(f'- {s}' + chr(10) for s in result['output']['suggestions']) or 'None'}
+
+## Generated files
+{''.join(f'- `{f}`' + chr(10) for f in result['output']['generated_files']) or 'None'}
+
+---
+*Generated by BinSmasher v{result['meta']['version']} at {result['meta']['timestamp']}*
+"""
+
+    if output_path is None:
+        from utils._process import WORK_DIR
+        bname = result["target"]["binary_name"] or "result"
+        output_path = os.path.join(WORK_DIR, f"report_{bname}.md")
+
+    with open(output_path, "w") as f:
+        f.write(md)
+
+    log.info(f"[json] Markdown report → {output_path}")
+    return output_path

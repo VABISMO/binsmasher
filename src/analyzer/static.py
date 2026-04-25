@@ -2,6 +2,10 @@
 import subprocess
 import re
 import logging
+try:
+    from .cache import load_cache, save_cache
+except ImportError:
+    load_cache = save_cache = lambda *a, **k: None
 from rich.console import Console
 from rich.table import Table
 
@@ -27,6 +31,13 @@ class StaticAnalysisMixin:
     ]
 
     def static_analysis(self):
+        # Try cache first
+        cached = load_cache(self.binary, "static_analysis")
+        if cached:
+            log.info("[cache] static_analysis hit")
+            return (cached.get("findings", {}),
+                    cached.get("target_function"),
+                    [tuple(f) for f in cached.get("functions", [])])
         log.info("Running static analysis (radare2)…")
         network_funcs = {
             "linux":   ["socket", "bind", "connect", "listen", "accept", "recv", "send", "recvfrom", "sendto"],
@@ -97,6 +108,11 @@ class StaticAnalysisMixin:
                       ", ".join(n for n, _ in functions[:8]) + ("…" if len(functions) > 8 else ""))
         console.print(table)
         log.debug(f"All functions ({len(functions)}): {[n for n, _ in functions]}")
+        save_cache(self.binary, "static_analysis", {
+            "findings": findings,
+            "target_function": target_function,
+            "functions": [[n, a] for n, a in functions],
+        })
         return findings, target_function, functions
 
     def _list_functions(self):

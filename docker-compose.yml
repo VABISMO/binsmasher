@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  binsmasher:
+    build: .
+    image: binsmasher:latest
+    volumes:
+      - ./:/workspace          # mount current dir as workspace
+      - /tmp/cores:/tmp/cores  # shared core dump dir
+    working_dir: /workspace
+    network_mode: host          # full network access for exploit delivery
+    cap_add:
+      - SYS_PTRACE             # needed for corefile / GDB attach
+    security_opt:
+      - seccomp:unconfined     # needed for syscall fuzzing
+    stdin_open: true
+    tty: true
+    entrypoint: ["binsmasher"]
+    command: ["--help"]
+
+  # Convenience: run test suite
+  test:
+    build: .
+    image: binsmasher:latest
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    network_mode: host
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    entrypoint: ["bash", "-c"]
+    command:
+      - "cd tests/src && make && cd ../.. && python3 tests/test_suite.py --local-only"

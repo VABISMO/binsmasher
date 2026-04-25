@@ -1,3 +1,4 @@
+from __future__ import annotations
 """BinSmasher – fuzzer package.
 
 Importable exactly as the original fuzzer.py:

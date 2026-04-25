@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Process helpers: core-dump suppression and shared temp-dir management."""
 import os
 import glob

@@ -1,6 +1,10 @@
 """Binary protection checking methods for BinaryAnalyzer."""
 import subprocess
 import logging
+try:
+    from .cache import load_cache, save_cache
+except ImportError:
+    load_cache = save_cache = lambda *a, **k: None
 from rich.console import Console
 from rich.table import Table
 
@@ -12,6 +16,10 @@ class ProtectionsMixin:
     """Methods: check_protections, _checksec_linux, _checksec_windows, _checksec_macos."""
 
     def check_protections(self):
+        cached = load_cache(self.binary, "protections")
+        if cached:
+            log.info("[cache] check_protections hit")
+            return tuple(cached)
         log.info("Checking binary protections…")
         stack_exec = True
         nx = aslr = canary = pie = False
@@ -45,7 +53,9 @@ class ProtectionsMixin:
             table.add_row("SafeSEH", str(safeseh))
             table.add_row("CFG", str(cfg))
         console.print(table)
-        return stack_exec, nx, aslr, canary, relro, safeseh, cfg, fortify, pie, shadow_stack
+        result = (stack_exec, nx, aslr, canary, relro, safeseh, cfg, fortify, pie, shadow_stack)
+        save_cache(self.binary, "protections", list(result))
+        return result
 
     def _checksec_linux(self):
         stack_exec = nx = aslr = canary = pie = False
