@@ -41,3 +41,9 @@ from .angr_analysis import angr_find_win, angr_find_vulnerabilities
 from .vuln_detect import VulnDetector, VulnInfo
 from .libc_db import (resolve_from_leak, lookup_by_symbol,
                        detect_libc_version, get_one_gadgets, LIBC_DB)
+
+from .libc_fingerprint import (fingerprint_libc, resolve_libc_multisym,
+                                 build_leak_chain_multi, parse_multi_leak)
+
+from .seccomp_parser import detect_seccomp_smart, SeccompParser
+from .binary_info import full_binary_info, is_pie, is_nx, get_relro, has_canary

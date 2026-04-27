@@ -3,10 +3,8 @@ Name: binsmasher
 Version: 4.2.0
 Summary: Ultimate Cross-Platform Binary Exploitation Framework
 Requires-Python: >=3.9
-License-File: LICENSE
 Requires-Dist: rich>=13
 Requires-Dist: pwntools
-Dynamic: license-file
 Dynamic: requires-dist
 Dynamic: requires-python
 Dynamic: summary

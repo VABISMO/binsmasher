@@ -1,182 +1,257 @@
 """
-Local libc database — common Ubuntu/Debian/Kali libcs pre-calculated.
-Used when libc.rip is unavailable (no internet, CTF isolated network).
-
-Offsets verified from official packages.
+Dynamic libc offset extraction — NO HARDCODED OFFSETS.
+Extracts all symbols dynamically from the actual libc binary using nm/objdump/strings.
+Maintains a minimal fallback DB only for offline scenarios.
 """
 from __future__ import annotations
+import subprocess
+import re
+import os
 import logging
+import urllib.request
+import json as _json
 
 log = logging.getLogger("binsmasher")
 
-# ── Database ──────────────────────────────────────────────────────────────────
-# Format: { "distro/version": { "symbol": offset, ... } }
-# All offsets are from the start of libc.so.6
-
-LIBC_DB: dict[str, dict[str, int]] = {
-
-    # ── Ubuntu 20.04 (glibc 2.31) ──────────────────────────────────────────
-    "ubuntu-20.04-amd64-2.31": {
-        "system":               0x055410,
-        "execve":               0x0E6C70,
-        "puts":                 0x080ED0,
-        "printf":               0x064F00,
-        "read":                 0x111130,
-        "write":                0x1111D0,
-        "open":                 0x10FC20,
-        "mprotect":             0x11B4F0,
-        "binsh":                0x1B75AA,
-        "__libc_start_main":    0x026FC0,
-        "__free_hook":          0x1EEB28,
-        "__malloc_hook":        0x1EEB10,
-        "malloc":               0x097AC0,
-        "free":                 0x097DA0,
-        "tcache_perthread_struct": 0x1B2C40,
-        "one_gadget_0":         0xE3AFE,
-        "one_gadget_1":         0xE3B01,
-        "one_gadget_2":         0xE3B04,
-        "_IO_list_all":         0x1ED5A0,
-        "_IO_wfile_jumps":      0x1E8F60,
-        "environ":              0x1EF2D0,
+# ── Minimal fallback DB (only for offline/no-binary scenarios) ───────────────
+# These are LAST RESORT - dynamic extraction is always preferred
+FALLBACK_DB: dict[str, dict[str, int]] = {
+    "glibc-2.31-amd64": {
+        "system": 0x055410, "puts": 0x080ED0, "binsh": 0x1B75AA,
     },
-
-    # ── Ubuntu 20.04 i386 (glibc 2.31) ────────────────────────────────────
-    "ubuntu-20.04-i386-2.31": {
-        "system":               0x040D80,
-        "execve":               0x0C4B30,
-        "puts":                 0x067530,
-        "binsh":                0x17E0AF,
-        "__libc_start_main":    0x01EF50,
-        "__free_hook":          0x1C2E78,
-        "__malloc_hook":        0x1C2E64,
-        "malloc":               0x07B710,
-        "free":                 0x07BA10,
-        "one_gadget_0":         0xC139B,
-    },
-
-    # ── Ubuntu 22.04 (glibc 2.35) ──────────────────────────────────────────
-    "ubuntu-22.04-amd64-2.35": {
-        "system":               0x050D70,
-        "execve":               0x0E63B0,
-        "puts":                 0x080E50,
-        "printf":               0x064550,
-        "read":                 0x111390,
-        "write":                0x111430,
-        "open":                 0x10F760,
-        "mprotect":             0x11C060,
-        "binsh":                0x1B45BD,
-        "__libc_start_main":    0x029D90,
-        "malloc":               0x09AC00,
-        "free":                 0x09AEF0,
-        "tcache_perthread_struct": 0x219C80,
-        "one_gadget_0":         0xEBCF1,
-        "one_gadget_1":         0xEBCF5,
-        "one_gadget_2":         0xEBCF8,
-        "_IO_list_all":         0x21A680,
-        "_IO_wfile_jumps":      0x2160C0,
-        "environ":              0x221200,
-        # Note: __malloc_hook and __free_hook removed in glibc 2.34+
-    },
-
-    # ── Ubuntu 22.04 i386 (glibc 2.35) ────────────────────────────────────
-    "ubuntu-22.04-i386-2.35": {
-        "system":               0x03C990,
-        "execve":               0x0BA5E0,
-        "puts":                 0x05F080,
-        "binsh":                0x17B7CF,
-        "__libc_start_main":    0x01D820,
-        "malloc":               0x073990,
-        "free":                 0x073CF0,
-    },
-
-    # ── Ubuntu 24.04 (glibc 2.39) ──────────────────────────────────────────
-    "ubuntu-24.04-amd64-2.39": {
-        "system":               0x058740,
-        "execve":               0x0F2C80,
-        "puts":                 0x088D90,
-        "printf":               0x06BA40,
-        "read":                 0x11A900,
-        "write":                0x11A9A0,
-        "open":                 0x1142A0,
-        "mprotect":             0x126EA0,
-        "binsh":                0x1CB42F,
-        "__libc_start_main":    0x02A150,
-        "malloc":               0x0A3740,
-        "free":                 0x0A3A40,
-        "tcache_perthread_struct": 0x21D2C0,
-        "one_gadget_0":         0xEBC67,
-        "one_gadget_1":         0xEBC6A,
-        "_IO_list_all":         0x21C640,
-        "_IO_wfile_jumps":      0x215C40,
-        "environ":              0x222DC8,
-    },
-
-    # ── Debian 11 / Kali 2022 (glibc 2.31) ────────────────────────────────
-    "debian-11-amd64-2.31": {
-        "system":               0x048E50,
-        "execve":               0x0DBBC0,
-        "puts":                 0x073600,
-        "binsh":                0x1B3A0A,
-        "__libc_start_main":    0x023EA0,
-        "__free_hook":          0x1EAEF0,
-        "__malloc_hook":        0x1EAED8,
-        "malloc":               0x08DB30,
-        "free":                 0x08DE20,
-        "one_gadget_0":         0xE1FA1,
-    },
-
-    # ── Debian 12 / Kali 2023 (glibc 2.36) ────────────────────────────────
-    "debian-12-amd64-2.36": {
-        "system":               0x04C490,
-        "execve":               0x0E3DF0,
-        "puts":                 0x07B270,
-        "binsh":                0x1B3E9A,
-        "__libc_start_main":    0x027840,
-        "malloc":               0x09A600,
-        "free":                 0x09A8F0,
-        "tcache_perthread_struct": 0x219440,
-        "one_gadget_0":         0xE3B01,
-        "_IO_list_all":         0x218560,
-        "_IO_wfile_jumps":      0x21A040,
-    },
-
-    # ── CTF generic (use as last resort) ──────────────────────────────────
-    "glibc-2.27-amd64": {
-        "system":               0x04F440,
-        "execve":               0x0E4E30,
-        "puts":                 0x07D7C0,
-        "binsh":                0x1B3E1A,
-        "__free_hook":          0x3ED8E8,
-        "__malloc_hook":        0x3EBC30,
-        "malloc":               0x09A2A0,
-        "free":                 0x09A5E0,
-        "one_gadget_0":         0x4F2A5,
-        "one_gadget_1":         0x4F2A8,
-    },
-
-    "glibc-2.23-amd64": {
-        "system":               0x045390,
-        "execve":               0x0CD0D0,
-        "puts":                 0x06F690,
-        "binsh":                0x18CD57,
-        "__free_hook":          0x3C67A8,
-        "__malloc_hook":        0x3C4B10,
-        "one_gadget_0":         0x45216,
-        "one_gadget_1":         0x4526A,
-        "one_gadget_2":         0xF02A4,
+    "glibc-2.35-amd64": {
+        "system": 0x050D70, "puts": 0x080E50, "binsh": 0x1B45BD,
     },
 }
 
+LIBC_DB = FALLBACK_DB
 
-# ── Symbol index for page-offset lookup ──────────────────────────────────────
-# Indexed as { (symbol, page_offset_hex): [libc_key, ...] }
+# ── Core Dynamic Extraction Functions ─────────────────────────────────────────
+
+def _run_cmd(cmd: list[str], timeout: int = 10) -> str | None:
+    """Run a command and return stdout, or None on failure."""
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, timeout=timeout,
+            stderr=subprocess.DEVNULL, text=True
+        )
+        return result.stdout if result.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def extract_symbols_from_libc(libc_path: str) -> dict[str, int]:
+    """
+    Extract ALL symbol offsets dynamically from a libc binary.
+    This is the PRIMARY method - no hardcoding.
+    """
+    if not libc_path or not os.path.isfile(libc_path):
+        return {}
+    
+    offsets = {}
+    
+    # 1. Extract symbols using nm -D
+    nm_out = _run_cmd(["nm", "-D", "--defined-only", libc_path])
+    if nm_out:
+        for line in nm_out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                try:
+                    addr = int(parts[0], 16)
+                    sym_type = parts[1]
+                    name = parts[2]
+                    # We want function symbols (T, W) and some data (D, B)
+                    if sym_type in ("T", "W", "D", "B", "R"):
+                        offsets[name] = addr
+                except ValueError:
+                    pass
+    
+    # 2. Also try readelf -s for more complete coverage
+    readelf_out = _run_cmd(["readelf", "-s", libc_path])
+    if readelf_out:
+        for line in readelf_out.splitlines():
+            # Format:    Num:    Value  Size Type    Bind   Vis      Ndx Name
+            # Example:   123: 0000000000055410   45 FUNC    WEAK   DEFAULT   13 system
+            parts = line.split()
+            if len(parts) >= 8:
+                try:
+                    addr = int(parts[1], 16)
+                    name = parts[7]
+                    if "FUNC" in line or "OBJECT" in line:
+                        if name not in offsets:
+                            offsets[name] = addr
+                except ValueError:
+                    pass
+    
+    # 3. Extract /bin/sh string location using strings
+    strings_out = _run_cmd(["strings", "-t", "x", libc_path])
+    if strings_out:
+        for line in strings_out.splitlines():
+            if line.strip().endswith("/bin/sh"):
+                parts = line.strip().split()
+                if parts:
+                    try:
+                        offsets["binsh"] = int(parts[0], 16)
+                        break
+                    except ValueError:
+                        pass
+    
+    # 4. Extract common aliases for easier lookup
+    if "__libc_system" in offsets and "system" not in offsets:
+        offsets["system"] = offsets["__libc_system"]
+    if "__GI___libc_start_main" in offsets and "__libc_start_main" not in offsets:
+        offsets["__libc_start_main"] = offsets["__GI___libc_start_main"]
+    
+    log.info(f"[libc_db] Dynamically extracted {len(offsets)} symbols from {libc_path}")
+    return offsets
+
+
+def extract_io_symbols(libc_path: str, offsets: dict[str, int] | None = None) -> dict[str, int]:
+    """
+    Extract _IO_* symbols needed for FSOP/House of Apple.
+    """
+    if offsets is None:
+        offsets = extract_symbols_from_libc(libc_path)
+    
+    io_syms = {}
+    for name, addr in offsets.items():
+        if name.startswith("_IO_"):
+            io_syms[name] = addr
+    
+    # Common aliases
+    if "_IO_2_1_stdin_" in offsets:
+        io_syms["stdin"] = offsets["_IO_2_1_stdin_"]
+    if "_IO_2_1_stdout_" in offsets:
+        io_syms["stdout"] = offsets["_IO_2_1_stdout_"]
+    if "_IO_2_1_stderr_" in offsets:
+        io_syms["stderr"] = offsets["_IO_2_1_stderr_"]
+    
+    return io_syms
+
+
+def find_libc_path(binary: str) -> str | None:
+    """Find the libc library path used by a binary."""
+    # 1. Use ldd
+    ldd_out = _run_cmd(["ldd", binary])
+    if ldd_out:
+        for line in ldd_out.splitlines():
+            # Match: libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x...)
+            # or: libc.so.6 => /lib/x86_64-linux-gnu/libc-2.31.so (0x...)
+            m = re.search(r"libc[^\s]*\s*=>\s*(/\S+libc[^\s]*)", line)
+            if m:
+                path = m.group(1)
+                if os.path.isfile(path):
+                    return path
+    
+    # 2. Try common locations
+    common_paths = [
+        "/lib/x86_64-linux-gnu/libc.so.6",
+        "/lib/x86_64-linux-gnu/libc-2.31.so",
+        "/lib/x86_64-linux-gnu/libc-2.35.so",
+        "/lib/aarch64-linux-gnu/libc.so.6",
+        "/lib/i386-linux-gnu/libc.so.6",
+        "/lib64/libc.so.6",
+        "/lib/libc.so.6",
+    ]
+    for path in common_paths:
+        if os.path.isfile(path):
+            return path
+    
+    # 3. Try to resolve symlink
+    try:
+        path = "/lib/x86_64-linux-gnu/libc.so.6"
+        if os.path.islink(path):
+            real = os.path.realpath(path)
+            if os.path.isfile(real):
+                return real
+    except Exception:
+        pass
+    
+    return None
+
+
+def detect_glibc_version(libc_path: str | None = None) -> str | None:
+    """Detect glibc version from libc binary or system."""
+    if libc_path and os.path.isfile(libc_path):
+        # Try strings output for version string
+        strings_out = _run_cmd(["strings", libc_path])
+        if strings_out:
+            m = re.search(r"GNU C Library.*?release version (\d+\.\d+)", strings_out)
+            if m:
+                return m.group(1)
+            # Alternative: look for version in path
+            m = re.search(r"libc-(\d+\.\d+)\.so", libc_path)
+            if m:
+                return m.group(1)
+    
+    # Try ldd --version
+    ldd_out = _run_cmd(["ldd", "--version"])
+    if ldd_out:
+        m = re.search(r"(\d+\.\d+)", ldd_out)
+        if m:
+            return m.group(1)
+    
+    return None
+
+
+def calculate_tcache_offset(libc_path: str, libc_base: int = 0) -> int | None:
+    """
+    Calculate tcache_perthread_struct offset dynamically.
+    This structure varies by glibc version, so we find it dynamically.
+    """
+    offsets = extract_symbols_from_libc(libc_path)
+    
+    # Try direct symbol
+    if "tcache_perthread_struct" in offsets:
+        return offsets["tcache_perthread_struct"]
+    
+    # Try __libc_tcache as alternative
+    if "__libc_tcache" in offsets:
+        return offsets["__libc_tcache"]
+    
+    # Estimate from thread pointer if we have the symbols
+    # tcache is usually at thread_area + 0x10 or similar
+    # This is architecture and version dependent
+    return None
+
+
+def find_one_gadgets(libc_path: str) -> list[int]:
+    """
+    Find one_gadget offsets by running one_gadget tool.
+    Returns list of candidate offsets.
+    """
+    try:
+        out = subprocess.check_output(
+            ["one_gadget", libc_path],
+            stderr=subprocess.DEVNULL,
+            text=True
+        )
+        gadgets = []
+        for line in out.splitlines():
+            m = re.match(r"(0x[0-9a-fA-F]+)", line)
+            if m:
+                gadgets.append(int(m.group(1), 16))
+        if gadgets:
+            log.info(f"[libc_db] Found {len(gadgets)} one_gadgets")
+        return gadgets
+    except FileNotFoundError:
+        log.debug("[libc_db] one_gadget tool not installed")
+        return []
+    except Exception as e:
+        log.debug(f"[libc_db] one_gadget error: {e}")
+        return []
+
+
+# ── Page-offset index for libc fingerprinting ────────────────────────────────
+
 _PAGE_INDEX: dict[tuple[str, str], list[str]] = {}
 
 
-def _build_index() -> None:
+def _build_fallback_index() -> None:
+    """Build index for fallback DB lookups."""
     global _PAGE_INDEX
     _PAGE_INDEX = {}
-    for libc_key, symbols in LIBC_DB.items():
+    for libc_key, symbols in FALLBACK_DB.items():
         for sym, off in symbols.items():
             page_off = hex(off & 0xfff)
             key = (sym, page_off)
@@ -185,7 +260,7 @@ def _build_index() -> None:
             _PAGE_INDEX[key].append(libc_key)
 
 
-_build_index()
+_build_fallback_index()
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -198,48 +273,34 @@ def lookup_by_symbol(symbol: str, leaked_addr: int) -> list[dict]:
     page_off = hex(leaked_addr & 0xfff)
     key = (symbol, page_off)
     matches = _PAGE_INDEX.get(key, [])
-
-    if not matches:
-        # Try alternative symbol names
-        aliases = {
-            "puts": ["puts", "__GI__IO_puts"],
-            "printf": ["printf", "__printf"],
-            "__libc_start_main": ["__libc_start_main", "__libc_start_main_impl"],
-        }
-        for canonical, alts in aliases.items():
-            if symbol in alts:
-                for alt in alts:
-                    alt_key = (alt, page_off)
-                    matches.extend(_PAGE_INDEX.get(alt_key, []))
-        matches = list(dict.fromkeys(matches))  # deduplicate
-
+    
     results = []
     for libc_key in matches:
-        sym_off = LIBC_DB[libc_key].get(symbol)
+        sym_off = FALLBACK_DB[libc_key].get(symbol)
         if sym_off is None:
             continue
         libc_base = leaked_addr - sym_off
         if libc_base & 0xfff != 0:
-            continue  # not page-aligned — bad match
+            continue
         results.append({
             "libc_key": libc_key,
             "libc_base": libc_base,
-            "offsets": LIBC_DB[libc_key],
+            "offsets": FALLBACK_DB[libc_key],
             "sym_offset": sym_off,
         })
-        log.info(f"[libc_db] Match: {libc_key}  base={hex(libc_base)}")
-
+        log.info(f"[libc_db] Fallback match: {libc_key}  base={hex(libc_base)}")
+    
     return results
 
 
 def get_offsets(libc_key: str) -> dict:
-    """Get all offsets for a specific libc version."""
-    return LIBC_DB.get(libc_key, {})
+    """Get offsets for a libc key (fallback only)."""
+    return FALLBACK_DB.get(libc_key, {})
 
 
 def get_one_gadgets(libc_key: str) -> list[int]:
-    """Return list of one_gadget offsets for a libc."""
-    d = LIBC_DB.get(libc_key, {})
+    """Return one_gadget offsets for a libc key (fallback only)."""
+    d = FALLBACK_DB.get(libc_key, {})
     gadgets = []
     for i in range(10):
         off = d.get(f"one_gadget_{i}")
@@ -251,59 +312,27 @@ def get_one_gadgets(libc_key: str) -> list[int]:
 def resolve_from_leak(symbol: str, leaked_addr: int,
                       libc_path: str | None = None) -> dict | None:
     """
-    One-shot: given a leaked symbol address, return the best libc match
-    with all offsets resolved to absolute addresses.
-
+    Resolve libc base and all offsets from a leaked symbol address.
+    
     Priority:
-    1. Local libc_db match (no internet)
-    2. Extract from libc_path on disk (nm)
-    3. libc.rip query (internet)
+    1. Extract dynamically from libc_path on disk (nm/objdump/strings)
+    2. Query libc.rip API (internet)
+    3. Use fallback DB (offline last resort)
     """
-    # 1. Local DB
-    matches = lookup_by_symbol(symbol, leaked_addr)
-    if matches:
-        best = matches[0]
-        base = best["libc_base"]
-        offs = best["offsets"]
-        absolute = {k: base + v for k, v in offs.items()}
-        absolute["__libc_base__"] = base
-        absolute["_libc_key"] = best["libc_key"]
-        log.info(f"[libc_db] Resolved via local DB: {best['libc_key']}")
-        return absolute
-
-    # 2. Disk extraction
-    if libc_path:
-        import subprocess
-        try:
-            nm = subprocess.check_output(
-                ["nm", "-D", "--defined-only", libc_path],
-                stderr=subprocess.DEVNULL).decode(errors="ignore")
-            sym_off = None
-            for line in nm.splitlines():
-                parts = line.split()
-                if len(parts) >= 3 and parts[-1] == symbol:
-                    sym_off = int(parts[0], 16)
-                    break
-            if sym_off:
-                base = leaked_addr - sym_off
-                if base & 0xfff == 0:
-                    log.info(f"[libc_db] Resolved via disk nm: base={hex(base)}")
-                    # Extract all common symbols
-                    result = {"__libc_base__": base}
-                    for line in nm.splitlines():
-                        parts = line.split()
-                        if len(parts) >= 3 and parts[1] in ("T", "W"):
-                            try:
-                                result[parts[-1]] = base + int(parts[0], 16)
-                            except ValueError:
-                                pass
-                    return result
-        except Exception as e:
-            log.debug(f"[libc_db] disk nm: {e}")
-
-    # 3. libc.rip
-    import urllib.request
-    import json as _json
+    # 1. Dynamic extraction from libc on disk
+    if libc_path and os.path.isfile(libc_path):
+        offsets = extract_symbols_from_libc(libc_path)
+        if symbol in offsets:
+            sym_off = offsets[symbol]
+            libc_base = leaked_addr - sym_off
+            if libc_base & 0xfff == 0:  # Page-aligned
+                absolute = {k: libc_base + v for k, v in offsets.items()}
+                absolute["__libc_base__"] = libc_base
+                absolute["_libc_key"] = f"dynamic:{libc_path}"
+                log.info(f"[libc_db] Resolved dynamically from {libc_path}: base={hex(libc_base)}")
+                return absolute
+    
+    # 2. libc.rip API
     try:
         page_off = hex(leaked_addr & 0xfff)
         url = f"https://libc.rip/api/v1/find?symbols={symbol}={page_off}"
@@ -321,94 +350,107 @@ def resolve_from_leak(symbol: str, leaked_addr: int,
             return absolute
     except Exception as e:
         log.debug(f"[libc_db] libc.rip: {e}")
-
+    
+    # 3. Fallback DB
+    matches = lookup_by_symbol(symbol, leaked_addr)
+    if matches:
+        best = matches[0]
+        base = best["libc_base"]
+        offs = best["offsets"]
+        absolute = {k: base + v for k, v in offs.items()}
+        absolute["__libc_base__"] = base
+        absolute["_libc_key"] = best["libc_key"]
+        log.info(f"[libc_db] Resolved via fallback DB: {best['libc_key']}")
+        return absolute
+    
     log.warning(f"[libc_db] Could not resolve {symbol}={hex(leaked_addr)}")
     return None
 
 
 def detect_libc_version(binary: str) -> tuple[str | None, dict]:
     """
-    Try to detect the libc version used by a binary and return its offsets.
-    Uses ldd, strings on libc, and nm.
+    Detect libc version and extract ALL offsets dynamically.
+    This is the main entry point for libc analysis.
     """
-    import subprocess, re, os
-
-    libc_path = None
-    libc_version = None
-
-    # 1. Find libc via ldd
-    try:
-        ldd = subprocess.check_output(
-            ["ldd", binary], stderr=subprocess.DEVNULL).decode(errors="ignore")
-        for line in ldd.splitlines():
-            if "libc.so" in line or "libc-" in line:
-                m = re.search(r"=>\s+(/\S+libc[^\s]*)", line)
-                if m:
-                    libc_path = m.group(1)
-                    break
-    except Exception:
-        pass
-
-    # 2. Detect version
-    if libc_path and os.path.isfile(libc_path):
-        try:
-            strings = subprocess.check_output(
-                ["strings", libc_path],
-                stderr=subprocess.DEVNULL).decode(errors="ignore")
-            m = re.search(r"GNU C Library.*?release version (\d+\.\d+)", strings)
-            if m:
-                libc_version = m.group(1)
-        except Exception:
-            pass
-        if not libc_version:
-            m = re.search(r"libc-(\d+\.\d+)\.so", libc_path)
-            if m:
-                libc_version = m.group(1)
-
-    # 3. Try to find in local DB
+    libc_path = find_libc_path(binary)
+    libc_version = detect_glibc_version(libc_path)
+    
     if libc_version:
-        log.info(f"[libc_db] Detected libc version: {libc_version}")
-        # Find best matching key
-        for key in LIBC_DB:
-            if libc_version in key:
-                offsets = LIBC_DB[key]
-                log.info(f"[libc_db] Using offsets from: {key}")
-                return libc_version, offsets
-
-    # 4. Extract directly from the binary
+        log.info(f"[libc_db] Detected glibc version: {libc_version}")
+    
+    # Always try dynamic extraction first
     if libc_path and os.path.isfile(libc_path):
-        try:
-            nm = subprocess.check_output(
-                ["nm", "-D", "--defined-only", libc_path],
-                stderr=subprocess.DEVNULL).decode(errors="ignore")
-            offsets = {}
-            want = {"system", "execve", "puts", "printf", "read", "write",
-                    "open", "mprotect", "__libc_start_main",
-                    "__malloc_hook", "__free_hook", "malloc", "free"}
-            for line in nm.splitlines():
-                parts = line.split()
-                if len(parts) >= 3 and parts[1] in ("T", "W") and parts[-1] in want:
-                    try:
-                        offsets[parts[-1]] = int(parts[0], 16)
-                    except ValueError:
-                        pass
-            # /bin/sh string
-            try:
-                st = subprocess.check_output(
-                    ["strings", "-t", "x", libc_path],
-                    stderr=subprocess.DEVNULL).decode(errors="ignore")
-                for ln in st.splitlines():
-                    if "/bin/sh" in ln:
-                        m2 = re.match(r"\s*([0-9a-f]+)\s+/bin/sh", ln)
-                        if m2:
-                            offsets["binsh"] = int(m2.group(1), 16)
-                            break
-            except Exception:
-                pass
-            if offsets:
-                log.info(f"[libc_db] Extracted {len(offsets)} offsets from {libc_path}")
-                return libc_version, offsets
-        except Exception as e:
-            log.debug(f"[libc_db] nm extraction: {e}")
-
+        offsets = extract_symbols_from_libc(libc_path)
+        if offsets:
+            log.info(f"[libc_db] Extracted {len(offsets)} symbols from {libc_path}")
+            return libc_version, offsets
+    
+    # Fallback to version-based lookup
+    if libc_version:
+        for key in FALLBACK_DB:
+            if libc_version in key:
+                log.info(f"[libc_db] Using fallback offsets for {key}")
+                return libc_version, FALLBACK_DB[key]
+    
     return libc_version, {}
+
+
+# ── Additional utility functions ──────────────────────────────────────────────
+
+def get_all_function_offsets(libc_path: str) -> dict[str, int]:
+    """Get all function offsets from libc for ROP/FSOP."""
+    offsets = extract_symbols_from_libc(libc_path)
+    functions = {}
+    wanted = {
+        "system", "execve", "execv", "execvp", "popen",
+        "puts", "printf", "sprintf", "fprintf", "dprintf",
+        "read", "write", "open", "openat", "close",
+        "mmap", "mprotect", "munmap",
+        "malloc", "free", "calloc", "realloc",
+        "memcpy", "memmove", "memset",
+        "strcpy", "strncpy", "strcat", "strncat",
+        "__libc_start_main", "main",
+        "__malloc_hook", "__free_hook", "__realloc_hook",
+        "_IO_list_all", "_IO_wfile_jumps", "_IO_2_1_stdin_",
+        "environ", "__environ",
+    }
+    for name in wanted:
+        if name in offsets:
+            functions[name] = offsets[name]
+    return functions
+
+
+def get_got_plt_offsets(binary_path: str) -> tuple[dict[str, int], dict[str, int]]:
+    """Extract GOT and PLT offsets from a binary."""
+    got = {}
+    plt = {}
+    
+    # Use readelf for GOT
+    readelf_out = _run_cmd(["readelf", "-r", binary_path])
+    if readelf_out:
+        for line in readelf_out.splitlines():
+            # Format: 000000404018  00000200000007 R_X86_64_JUMP_SLOT  puts
+            parts = line.split()
+            if len(parts) >= 5 and "JUMP_SLOT" in line:
+                try:
+                    addr = int(parts[0], 16)
+                    name = parts[4]
+                    got[name] = addr
+                except ValueError:
+                    pass
+    
+    # Use objdump for PLT
+    objdump_out = _run_cmd(["objdump", "-d", "-j", ".plt", binary_path])
+    if objdump_out:
+        for line in objdump_out.splitlines():
+            # Format: 401020 <puts@plt>:
+            m = re.match(r"\s*([0-9a-f]+)\s*<(\w+)@plt>:", line)
+            if m:
+                try:
+                    addr = int(m.group(1), 16)
+                    name = m.group(2)
+                    plt[name] = addr
+                except ValueError:
+                    pass
+    
+    return got, plt

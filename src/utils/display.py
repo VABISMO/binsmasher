@@ -23,13 +23,19 @@ def print_summary(offset, stack_addr, return_addr, exploit_type,
     table.add_column("Value", min_width=24)
 
     table.add_row("Offset", str(offset) if offset is not None else "N/A")
-    table.add_row("Stack Address",
-                  hex(stack_addr) if stack_addr else "[dim]N/A  (needs GDB or fmt-string leak)[/]")
+    # stack_addr is RSP at crash from corefile/GDB if available
+    if stack_addr and stack_addr > 0x1000:
+        _stack_display = f"[bold green]{hex(stack_addr)}[/]  (stack/buf addr)"
+    elif return_addr and return_addr > 0x1000:
+        _stack_display = f"[dim]N/A  (ret={hex(return_addr)}, stack addr not recovered)[/]"
+    else:
+        _stack_display = "[dim]N/A  (use --spawn-target or GDB to recover)[/]"
+    table.add_row("Stack Address", _stack_display)
     table.add_row("Return Address",
                   (f"[bold green]{hex(return_addr)}[/]  ← win()" if return_addr and return_addr > 0x1000
                    else ("[dim]N/A[/]")))
     table.add_row("Canary  (leaked)",
-                  (f"[bold]{hex(canary)}[/]" if canary
+                  (f"[bold green]{hex(canary)}[/] ✓ leaked" if canary
                    else "[dim]N/A  (not bruted / not present)[/]"))
     table.add_row("Exploit Type", exploit_type or "N/A")
     table.add_row("Target Function", target_function or "N/A")

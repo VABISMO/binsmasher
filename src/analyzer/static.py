@@ -21,9 +21,11 @@ class StaticAnalysisMixin:
         "read", "fread", "recv", "memcpy", "memmove", "strncpy", "strncat",
         "mpg123_decode", "malloc", "free", "realloc", "calloc",
     ]
+    # Only functions where the FORMAT STRING itself can be user-controlled
+    # sprintf/snprintf/syslog take explicit format strings → usually safe
+    # printf/fprintf/dprintf are dangerous when called with user buffer as format arg
     FORMAT_STRING_FUNCTIONS = [
-        "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf",
-        "vsprintf", "vsnprintf", "dprintf", "syslog",
+        "printf", "fprintf", "dprintf", "syslog",
     ]
     RUST_SPECIFIC = [
         "panic", "assert", "unwrap", "deserial", "borsh", "bincode",
@@ -85,7 +87,8 @@ class StaticAnalysisMixin:
         if not functions:
             log.warning("No functions detected — binary may be stripped.")
             return findings, None, []
-        priority_keywords = ["main", "handle", "client", "process", "input", "recv", "read",
+        priority_keywords = ["vuln", "vulnerable", "overflow", "bof", "gets", "unsafe",
+                             "main", "handle", "client", "process", "input", "recv", "read",
                              "transaction", "execute", "svm", "borsh"]
         target_function = None
         for kw in priority_keywords:
