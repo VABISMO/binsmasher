@@ -145,6 +145,14 @@ def _build_parser() -> argparse.ArgumentParser:
     adv.add_argument("--orw",   dest="force_orw",  action="store_true",
                      help="Force ORW chain (seccomp bypass)")
     adv.add_argument("--flag-path", default="/flag")
+    adv.add_argument("--win-names", default="",
+                     help="Comma-separated list of win function names (e.g., 'win,flag,shell')")
+    adv.add_argument("--offset-min", type=int, default=8,
+                     help="Minimum offset to try for brute force (default: 8)")
+    adv.add_argument("--offset-max", type=int, default=520,
+                     help="Maximum offset to try for brute force (default: 520)")
+    adv.add_argument("--offset-step", type=int, default=8,
+                     help="Step size for offset brute force (default: 8)")
     adv.add_argument("--ret2mprotect", action="store_true", dest="ret2mprotect",
                      help="Force ret2mprotect (make memory executable)")
     adv.add_argument("--off-by-one", action="store_true", dest="off_by_one",
@@ -308,8 +316,18 @@ def run_binary(cfg):
     canary_enabled = _bi.get("canary", canary_enabled)
 
     fuzzer    = Fuzzer(cfg.binary, cfg.host, cfg.port, cfg.log_file, platform)
+
+    # Parse custom win function names if provided
+    win_names = None
+    if getattr(cfg, 'win_names', ''):
+        win_names = [n.strip() for n in cfg.win_names.split(',') if n.strip()]
+
+    # Parse offset range
+    offset_range = (cfg.offset_min, cfg.offset_max, cfg.offset_step)
+
     exploiter = ExploitGenerator(cfg.binary, platform, cfg.host, cfg.port,
-                                  cfg.log_file, cfg.tls, cfg.binary_args)
+                                  cfg.log_file, cfg.tls, cfg.binary_args,
+                                  win_names=win_names, offset_range=offset_range)
 
     # Smart seccomp detection (no seccomp-tools required)
     _seccomp_info = {"has_seccomp": False, "orw_needed": False, "allowed_syscalls": []}

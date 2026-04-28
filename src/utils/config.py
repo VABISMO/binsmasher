@@ -49,6 +49,11 @@ class ExploitConfig:
     udp: bool = False
     # v4.2 – spawn & manage the target process for UDP crash detection
     spawn_target: bool = False
+    # v4.3 – configurable win function names and offset range
+    win_names: str = ""
+    offset_min: int = 8
+    offset_max: int = 520
+    offset_step: int = 8
 
     def validate(self) -> None:
         if not os.path.isfile(self.binary):
