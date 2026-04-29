@@ -79,6 +79,7 @@ targets.forEach(function(fn){
             script.unload()
             session.detach()
             proc.terminate()
+            proc.wait(timeout=5)
             log.info(f"Frida captured {len(msgs)} events")
             for m in msgs[:20]:
                 log.debug(f"  Frida → {m.get('payload', m)}")

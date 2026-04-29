@@ -204,8 +204,7 @@ class CoreAnalysisMixin:
         try:
             from pwn import ELF as _BELf, ROP as _BROP, p64 as _bp64, context as _bctx
             _elf = _BELf(binary, checksec=False)
-            _WIN_KW = ["win", "flag", "shell", "backdoor", "secret",
-                       "easy", "print_flag", "cat_flag"]
+            from constants import DEFAULT_WIN_PATTERNS as _WIN_KW
             _win_rel = next(
                 (a for n, a in _elf.symbols.items()
                  if a and any(kw == n.lower() or n.lower().startswith(kw)

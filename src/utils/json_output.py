@@ -9,6 +9,8 @@ import logging
 import os
 import time
 
+from constants import VERSION
+
 log = logging.getLogger("binsmasher")
 
 
@@ -39,7 +41,7 @@ def build_result(
     return {
         "meta": {
             "tool": "BinSmasher",
-            "version": "4.2.0",
+            "version": VERSION,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "duration_sec": round(duration_sec, 2) if duration_sec else None,
         },

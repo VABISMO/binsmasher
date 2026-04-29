@@ -24,7 +24,7 @@ def _binary_hash(binary_path: str) -> str:
                 h.update(chunk)
     except OSError:
         return ""
-    return h.hexdigest()[:16]
+    return h.hexdigest()[:24]  # 96 bits — sufficient collision resistance for cache keys
 
 
 def _cache_path(binary_path: str) -> str:
@@ -42,7 +42,8 @@ def load_cache(binary_path: str, key: str) -> dict | None:
     if not path or not os.path.isfile(path):
         return None
     try:
-        data = json.loads(open(path).read())
+        with open(path) as f:
+            data = json.loads(f.read())
         if time.time() - data.get("_ts", 0) > MAX_AGE_SECONDS:
             log.debug(f"[cache] stale: {path}")
             return None
@@ -64,7 +65,8 @@ def save_cache(binary_path: str, key: str, value) -> None:
         data = {}
         if os.path.isfile(path):
             try:
-                data = json.loads(open(path).read())
+                with open(path) as f:
+                    data = json.loads(f.read())
             except Exception:
                 data = {}
         data["_ts"] = time.time()

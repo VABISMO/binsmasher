@@ -33,8 +33,7 @@ def angr_find_win(binary: str, timeout: int = 60) -> dict:
         log.warning("[angr] not installed — skipping")
         return result
 
-    WIN_KW = ["win", "flag", "shell", "backdoor", "secret", "easy",
-              "print_flag", "cat_flag", "get_flag", "give_shell"]
+    from constants import DEFAULT_WIN_PATTERNS as WIN_KW
 
     log.info(f"[angr] Loading {binary}…")
     try:

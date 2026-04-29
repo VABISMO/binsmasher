@@ -30,8 +30,6 @@ def get_elf_type(binary: str) -> int | None:
             if magic != ELF_MAGIC:
                 return None
             f.seek(16)  # e_type offset
-            ei_class = ord(open(binary, "rb").read(5)[-1:])  # EI_CLASS
-            f.seek(16)
             e_type = struct.unpack("<H", f.read(2))[0]
             return e_type
     except Exception as e:
@@ -97,7 +95,8 @@ def get_relro(binary: str) -> str:
         dyn_out = subprocess.check_output(
             ["readelf", "-W", "-d", binary],
             stderr=subprocess.DEVNULL).decode(errors="ignore")
-        has_bind_now = "BIND_NOW" in dyn_out or "FLAGS" in dyn_out and "BIND_NOW" in dyn_out
+        has_bind_now = ("BIND_NOW" in dyn_out
+                        or ("FLAGS" in dyn_out and "BIND_NOW" in dyn_out))
         # Also check FLAGS_1 NODELETE
         if "FLAGS_1" in dyn_out:
             for line in dyn_out.splitlines():
@@ -115,14 +114,26 @@ def get_relro(binary: str) -> str:
 
 
 def has_canary(binary: str) -> bool:
-    """Detect stack canary via __stack_chk_fail in dynamic symbols."""
+    """Detect stack canary via __stack_chk_fail in symbols (dynamic or static)."""
+    # Try dynamic symbols first
     try:
         out = subprocess.check_output(
             ["nm", "-D", binary], stderr=subprocess.DEVNULL
         ).decode(errors="ignore")
-        return "__stack_chk_fail" in out
+        if "__stack_chk_fail" in out:
+            return True
     except Exception:
         pass
+    # Try all symbols (including static binaries)
+    try:
+        out = subprocess.check_output(
+            ["nm", binary], stderr=subprocess.DEVNULL
+        ).decode(errors="ignore")
+        if "__stack_chk_fail" in out or "stack_chk" in out:
+            return True
+    except Exception:
+        pass
+    # Fallback: readelf -s covers both dynamic and static symbol tables
     try:
         out = subprocess.check_output(
             ["readelf", "-s", binary], stderr=subprocess.DEVNULL
@@ -136,7 +147,8 @@ def has_canary(binary: str) -> bool:
 def get_aslr() -> int:
     """Read system ASLR setting: 0=off, 1=partial, 2=full."""
     try:
-        val = open("/proc/sys/kernel/randomize_va_space").read().strip()
+        with open("/proc/sys/kernel/randomize_va_space") as f:
+            val = f.read().strip()
         return int(val)
     except Exception:
         return 2  # assume ASLR on

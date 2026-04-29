@@ -7,6 +7,8 @@ import logging
 import os
 import time
 
+from constants import VERSION
+
 log = logging.getLogger("binsmasher")
 
 
@@ -101,7 +103,7 @@ def exploit():
     io = remote(HOST, PORT)
     # Drain banner if present
     try: io.recvline(timeout=1)
-    except: pass
+    except Exception: pass
 
     cv  = p64(CANARY) if {bool(canary_val)} else b""
     pad = b"B" * 8
@@ -125,7 +127,7 @@ if __name__ == "__main__":
 **Date:** {timestamp}  
 **Category:** pwn  
 **Difficulty:** medium  
-**Tool:** BinSmasher v{meta.get("version", "4.2")}  
+**Tool:** BinSmasher v{meta.get("version", VERSION)}  
 **Status:** {"✅ Solved" if success else "❌ Not solved"}  
 {"**Time:** " + str(duration) + "s" if duration else ""}
 

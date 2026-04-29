@@ -125,7 +125,7 @@ class VulnDetector:
             # Try once more
             time.sleep(0.5)
             resp = self._send_recv(b"A")
-            alive = resp != b"" or True  # crashes on empty input too
+            alive = resp != b""  # no response = service crashed or down
         return alive, resp
 
     def _detect_format_string(self) -> tuple[bool, int | None, list[str]]:
@@ -337,9 +337,9 @@ class VulnDetector:
                 log.info(f"[vuln_detect] ✓ UAF (tentative)")
 
         if info.vuln_type == "UNKNOWN":
-            info.notes.append("Could not determine vuln type — defaulting to STACK_OVERFLOW")
-            info.vuln_type = "STACK_OVERFLOW"
-            info.confidence = 0.30
-            log.warning("[vuln_detect] Unknown vuln type — defaulting to STACK_OVERFLOW")
+            info.notes.append("Could not determine vuln type — assuming generic overflow")
+            info.vuln_type = "UNKNOWN"
+            info.confidence = 0.0
+            log.warning("[vuln_detect] Unknown vuln type — not defaulting to avoid misclassification")
 
         return info

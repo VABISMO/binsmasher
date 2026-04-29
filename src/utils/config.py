@@ -54,23 +54,23 @@ class ExploitConfig:
     offset_min: int = 8
     offset_max: int = 520
     offset_step: int = 8
+    # v4.4 – configurable timeouts (seconds)
+    timeout: float = 30.0
+    connect_timeout: float = 5.0
+    recv_timeout: float = 3.0
 
     def validate(self) -> None:
         if not os.path.isfile(self.binary):
-            console.print(Panel(f"[bold red]Binary not found:[/] {self.binary}", border_style="red"))
-            sys.exit(1)
+            raise FileNotFoundError(f"Binary not found: {self.binary}")
         if not (1 <= self.port <= 65535):
-            console.print(Panel(f"[bold red]Invalid port:[/] {self.port}", border_style="red"))
-            sys.exit(1)
+            raise ValueError(f"Invalid port: {self.port}")
         if self.output_port and not (1 <= self.output_port <= 65535):
-            console.print(Panel(f"[bold red]Invalid output port:[/] {self.output_port}", border_style="red"))
-            sys.exit(1)
+            raise ValueError(f"Invalid output port: {self.output_port}")
         if self.return_addr:
             try:
                 int(self.return_addr, 16)
             except ValueError:
-                console.print(Panel(f"[bold red]Invalid hex return address:[/] {self.return_addr}", border_style="red"))
-                sys.exit(1)
+                raise ValueError(f"Invalid hex return address: {self.return_addr}")
 
     @property
     def binary_args_list(self) -> list:

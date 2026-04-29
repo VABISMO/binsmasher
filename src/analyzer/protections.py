@@ -109,7 +109,11 @@ class ProtectionsMixin:
         return stack_exec, nx, aslr, canary, relro, pie, fortify, shadow_stack
 
     def _checksec_windows(self):
-        import pefile
+        try:
+            import pefile
+        except ImportError:
+            log.warning("[protections] pefile not installed — Windows PE detection unavailable")
+            return False, False, False, "Unknown", "Unknown", False
         nx = aslr = canary = False
         safeseh = cfg = "Disabled"
         pe = pefile.PE(self.binary)

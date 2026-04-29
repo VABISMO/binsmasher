@@ -53,7 +53,8 @@ class UDPMixin:
         sock.close()
         if not responded:
             time.sleep(1.0)
-        return True
+            log.warning(f"[udp] Port {host}:{port} did not respond — proceeding anyway")
+        return responded
 
     @staticmethod
     def _build_udp_payload(template: bytes, inject: bytes) -> bytes:

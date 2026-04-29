@@ -19,13 +19,15 @@ class StaticAnalysisMixin:
     VULNERABLE_FUNCTIONS = [
         "gets", "strcpy", "strcat", "sprintf", "vsprintf", "scanf", "sscanf",
         "read", "fread", "recv", "memcpy", "memmove", "strncpy", "strncat",
-        "mpg123_decode", "malloc", "free", "realloc", "calloc",
+        "mpg123_decode",
     ]
+    HEAP_FUNCTIONS = ["malloc", "free", "realloc", "calloc"]
     # Only functions where the FORMAT STRING itself can be user-controlled
     # sprintf/snprintf/syslog take explicit format strings → usually safe
     # printf/fprintf/dprintf are dangerous when called with user buffer as format arg
     FORMAT_STRING_FUNCTIONS = [
-        "printf", "fprintf", "dprintf", "syslog",
+        "printf", "fprintf", "dprintf", "syslog", "vsyslog",
+        "err", "errx", "warn", "warnx",
     ]
     RUST_SPECIFIC = [
         "panic", "assert", "unwrap", "deserial", "borsh", "bincode",
@@ -68,8 +70,9 @@ class StaticAnalysisMixin:
         for fn in self.VULNERABLE_FUNCTIONS:
             if fn in combined:
                 findings["vulnerable_functions"].append(fn)
-                if fn in ("malloc", "free", "realloc", "calloc"):
-                    findings["heap_functions"].append(fn)
+        for fn in self.HEAP_FUNCTIONS:
+            if fn in combined:
+                findings["heap_functions"].append(fn)
         for fn in self.FORMAT_STRING_FUNCTIONS:
             if fn in combined:
                 findings["format_string_functions"].append(fn)
@@ -176,6 +179,6 @@ class StaticAnalysisMixin:
         return fns
 
     def _r2(self, cmd):
-        full = f"r2 -A -q -c '{cmd}' {self.binary}"
-        return subprocess.check_output(full, shell=True,
-                                       stderr=subprocess.DEVNULL, timeout=30).decode(errors="ignore")
+        return subprocess.check_output(
+            ["r2", "-A", "-q", "-c", cmd, self.binary],
+            stderr=subprocess.DEVNULL, timeout=30).decode(errors="ignore")

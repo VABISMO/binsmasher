@@ -65,7 +65,8 @@ class SeccompParser:
         }
 
         try:
-            data = open(self.binary, "rb").read()
+            with open(self.binary, "rb") as f:
+                data = f.read()
 
             # Check for seccomp-related strings/patterns
             if b"seccomp" in data or b"PR_SET_SECCOMP" in data:
@@ -231,7 +232,8 @@ class SeccompParser:
         BPF instructions are 8 bytes: code(2) jt(1) jf(1) k(4)
         """
         try:
-            data = open(self.binary, "rb").read()
+            with open(self.binary, "rb") as f:
+                data = f.read()
             allowed = []
             blocked = []
 
@@ -257,9 +259,9 @@ class SeccompParser:
         except Exception as e:
             log.debug(f"[seccomp_parser] BPF parse: {e}")
 
-        # Return common CTF-safe syscalls as default
-        return ["read", "write", "open", "openat", "close", "fstat",
-                "mmap", "mprotect", "brk", "exit", "exit_group"]
+        # Could not parse BPF — return empty list (not a guess)
+        log.warning("[seccomp_parser] BPF parsing failed — returning empty allowed list")
+        return []
 
 
 def detect_seccomp_smart(binary: str, pid: int | None = None) -> dict:
