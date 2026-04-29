@@ -18,10 +18,10 @@
 | 🛡️ **Protection Bypass** | PIE, NX, ASLR, canary, RELRO, seccomp, CFI, SafeSEH |
 | 📊 **Binary Analysis** | Static analysis, gadget finding, libc fingerprinting, seccomp parsing |
 | ⚙️ **Fully Configurable** | Custom win function names, offset ranges, and exploit parameters via CLI |
-| 🔗 **Network Ready** | TCP, UDP, TLS support with adaptive timeouts |
-| 🧪 **Test Suite** | 27+ unit tests, 25+ integration tests, comprehensive coverage |
+| 🔗 **Network Ready** | TCP, UDP, HTTP, TLS support with adaptive timeouts |
+| 🧪 **Test Suite** | 245+ unit tests, 25+ integration tests, comprehensive coverage |
 | 📝 **Auto-Generated** | Exploit scripts, GDB scripts, crash scripts, CTF writeups |
-| 🔧 **Extensible** | Modular mixin architecture (23 mixins), easy to add new techniques |
+| 🔧 **Extensible** | Modular mixin architecture (25 mixins), easy to add new techniques |
 
 ---
 
@@ -137,13 +137,16 @@ binsmasher/
 │   │   ├── fsop.py                   # FSOP for glibc 2.34+ (House of Banana/Emma/Kiwi)
 │   │   ├── canary_leak.py            # Canary leak without fork-server
 │   │   ├── session.py                # Stateful menu/login service interaction
-│   │   └── udp_strategies.py         # UDP+spawn exploit engine (A–F)
+│   │   ├── udp_strategies.py         # UDP+spawn exploit engine (A–F)
+│   │   └── http_strategies.py        # HTTP+spawn exploit engine (A–E)
 │   │
 │   ├── fuzzer/
 │   │   ├── afl.py                    # AFL++ coverage fuzzing
 │   │   ├── boofuzz_fuzz.py           # boofuzz network fuzzing
 │   │   ├── mutation.py               # Built-in mutation fuzzer
 │   │   ├── udp.py                    # UDP offset detection (bisect + corefile)
+│   │   ├── http.py                   # HTTP payload template + offset detection
+│   │   ├── template_utils.py         # Protocol-agnostic {PAYLOAD} substitution + Content-Length
 │   │   ├── core_analysis.py          # Core dump analysis
 │   │   ├── gdb_scripts.py            # GDB script generation (pwndbg/peda/vanilla)
 │   │   ├── offset_roto.py            # ROTO heuristic, SIGFAULT analysis
@@ -215,8 +218,9 @@ binsmasher solana   [options]   # Agave/Solana SVM auditing
 | `--reverse-shell` | off | Reverse shell payload |
 | `--file-input` | — | Embed shellcode in `mp3` or `raw` file |
 | `--binary-args` | `""` | Arguments to pass to spawned binary |
-| `--payload-data` | — | Custom payload template (`{PAYLOAD}` placeholder for UDP+spawn) |
+| `--payload-data` | — | Custom payload template (`{PAYLOAD}` placeholder for injection) |
 | `--udp` | off | Send `--payload-data` via UDP |
+| `--http` | off | HTTP mode: send payload as HTTP request (e.g. `--http "POST /submit"`) |
 | `--spawn-target` | off | Spawn binary locally for crash detection |
 | `--bad-bytes` | `""` | Hex bytes to avoid in exploit addresses (e.g. `0a0d` for SIP) |
 | `--menu-script` | — | JSON interaction script for menu-based services |
@@ -378,6 +382,79 @@ binsmasher binary -b ./custom --host 127.0.0.1 --port 4444 \
 ## Exploit Techniques — UDP+Spawn Mode
 
 Activated with `--payload-data` + `--udp` + `--spawn-target`.
+
+| Strategy | Name | Viable when |
+|---|---|---|
+| A | **ret2system ROP** | `ret_offset + 24 < min_crash`, `pop rdi` available |
+| A* | **ret2csu fallback** | As above, no `pop rdi` — uses `__libc_csu_init` |
+| B | **SROP** | `syscall;ret` + `pop rax;ret`, frame fits in payload |
+| C | **GOT overwrite** | Pointer-overwrite crash pattern detected |
+| D | **ret2win** | Win symbol found, `ret_offset + 8 < min_crash` |
+| E | **one_gadget** | `one_gadget` installed, no bad bytes |
+| F | **ORW** | `--orw` flag, execve blocked by seccomp |
+
+---
+
+## Exploit Techniques — HTTP+Spawn Mode
+
+Activated with `--payload-data` + `--http` + `--spawn-target`.
+
+Same strategy cascade as UDP (A–E), but delivers exploits via HTTP over TCP.
+
+| Strategy | Name | Viable when |
+|---|---|---|
+| A | **ret2system ROP** | Stack overflow, `pop rdi` available |
+| B | **SROP** | `syscall;ret` + `pop rax;ret` |
+| C | **ret2win** | Win symbol found |
+| D | **one_gadget** | `one_gadget` installed |
+| E | **ORW** | `--orw` flag, seccomp detected |
+
+---
+
+## Custom Payload Mode — HTTP
+
+Use `--http` to send payloads as HTTP requests. Works with or without `--spawn-target`.
+
+### HTTP with spawn (offset detection + auto exploit)
+
+```bash
+# Template with {PAYLOAD} placeholder — auto-detects injection point
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http "POST /submit" \
+  --payload-data 'username=AAAA&data={PAYLOAD}' \
+  --spawn-target -t
+
+# Full HTTP template — Content-Length auto-recalculated
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http --spawn-target \
+  --payload-data "$(cat http_template.txt)" -t
+```
+
+### HTTP raw send (no spawn, no offset detection)
+
+```bash
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http "POST /login" \
+  --payload-data 'user=admin&data={PAYLOAD}'
+```
+
+When `--payload-data` already contains HTTP framing (starts with `POST`, `GET`, etc.), BinSmasher sends it as-is. Otherwise it wraps the body in HTTP/1.1 framing with `Content-Length` and `Connection: close`.
+
+### HTTP template example
+
+```
+POST /vuln HTTP/1.1
+Host: target
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 8
+
+data={PAYLOAD}
+```
+
+`Content-Length` is automatically recalculated after `{PAYLOAD}` substitution.
 
 | Strategy | Name | Viable when |
 |---|---|---|
@@ -617,6 +694,32 @@ binsmasher binary -b /path/to/sip_server \
   --bad-bytes 0a0d \
   --adaptive-timeout \
   --payload-data "$(cat invite.txt)"
+```
+
+### CTF — HTTP service with exploit
+
+```bash
+# Auto-detect offset and exploit via HTTP POST
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http "POST /submit" \
+  --payload-data 'user=AAAA&data={PAYLOAD}' \
+  --spawn-target -t
+
+# Full HTTP template with headers
+cat > http_template.txt << 'EOF'
+POST /vuln HTTP/1.1
+Host: target
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 8
+
+data={PAYLOAD}
+EOF
+
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http --spawn-target \
+  --payload-data "$(cat http_template.txt)" -t
 ```
 
 ### Menu binary (heap CTF)

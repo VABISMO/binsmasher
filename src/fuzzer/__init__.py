@@ -10,6 +10,7 @@ from .boofuzz_fuzz import BoofuzzMixin
 from .mutation import MutationMixin
 from .offset_roto import OffsetRotoMixin
 from .udp import UDPMixin
+from .http import HTTPMixin
 from .core_analysis import CoreAnalysisMixin
 from .gdb_scripts import GDBScriptsMixin
 from .solana import SolanaMixin
@@ -21,6 +22,7 @@ class Fuzzer(
     MutationMixin,      # mutation_fuzz
     OffsetRotoMixin,    # find_offset_roto, sigfault_analysis
     UDPMixin,           # find_offset_udp_payload, deliver_exploit_udp, send_raw_payload, …
+    HTTPMixin,          # find_offset_http_payload, deliver_exploit_http, send_http_payload, …
     CoreAnalysisMixin,  # _find_offset_from_core_stack, _extract_rip_from_coredumpctl, …
     GDBScriptsMixin,    # generate_gdb_script
     SolanaMixin,        # fuzz_bpf, exploit_deser, dos_quic, exploit_snapshot_assert

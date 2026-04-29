@@ -58,6 +58,10 @@ class ExploitConfig:
     timeout: float = 30.0
     connect_timeout: float = 5.0
     recv_timeout: float = 3.0
+    # v4.5 – HTTP payload template support
+    http: Optional[str] = None      # None=off, "POST /submit" etc.
+    http_method: str = "POST"
+    http_path: str = "/"
 
     def validate(self) -> None:
         if not os.path.isfile(self.binary):
@@ -71,6 +75,11 @@ class ExploitConfig:
                 int(self.return_addr, 16)
             except ValueError:
                 raise ValueError(f"Invalid hex return address: {self.return_addr}")
+        # Parse --http "METHOD PATH" into http_method and http_path
+        if self.http:
+            parts = self.http.strip().split(None, 1)
+            self.http_method = parts[0].upper() if parts else "POST"
+            self.http_path = parts[1] if len(parts) > 1 else "/"
 
     @property
     def binary_args_list(self) -> list:

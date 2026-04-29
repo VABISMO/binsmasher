@@ -6,6 +6,8 @@ import time
 import subprocess
 import logging
 from utils._process import no_core_preexec, core_preexec, set_core_pattern, cleanup_cores, CORE_DIR
+from .template_utils import find_inject_field as _tpl_find_inject_field
+from .template_utils import build_payload as _tpl_build_payload
 
 log = logging.getLogger("binsmasher")
 
@@ -17,21 +19,7 @@ class UDPMixin:
 
     @staticmethod
     def _find_inject_field(data: bytes) -> tuple:
-        PLACEHOLDER = b"{PAYLOAD}"
-        idx = data.find(PLACEHOLDER)
-        if idx != -1:
-            return idx, 4096, 0x41
-        best_start, best_len, best_byte = 0, 0, 0x41
-        i = 0
-        while i < len(data):
-            j = i + 1
-            while j < len(data) and data[j] == data[i]:
-                j += 1
-            run_len = j - i
-            if run_len >= 16 and run_len > best_len:
-                best_start, best_len, best_byte = i, run_len, data[i]
-            i = j
-        return best_start, best_len, best_byte
+        return _tpl_find_inject_field(data)
 
     @staticmethod
     def _wait_for_udp_port(host: str, port: int, timeout: float = 5.0) -> bool:
@@ -58,31 +46,7 @@ class UDPMixin:
 
     @staticmethod
     def _build_udp_payload(template: bytes, inject: bytes) -> bytes:
-        PLACEHOLDER = b"{PAYLOAD}"
-        if PLACEHOLDER in template:
-            crafted = template.replace(PLACEHOLDER, inject, 1)
-        else:
-            best = None
-            for m in re.finditer(rb"(.)\1{15,}", template):
-                if best is None or len(m.group(0)) > len(best.group(0)):
-                    best = m
-            if best:
-                inj = inject + bytes([best.group(1)[0]]) * max(0, len(best.group(0)) - len(inject))
-                crafted = template[:best.start()] + inj[:len(best.group(0))] + template[best.end():]
-            else:
-                crafted = template + inject
-        sep = b"\r\n\r\n"
-        if sep in crafted and b"Content-Length:" in crafted:
-            hdr_part, body_part = crafted.split(sep, 1)
-            body_len = len(body_part)
-            new_hdr = re.sub(
-                rb"(Content-Length:[ \t]*)\d+",
-                lambda m: m.group(1) + str(body_len).encode(),
-                hdr_part,
-                flags=re.IGNORECASE,
-            )
-            crafted = new_hdr + sep + body_part
-        return crafted
+        return _tpl_build_payload(template, inject)
 
     def find_offset_udp_payload(self,
                                 payload_template: bytes,

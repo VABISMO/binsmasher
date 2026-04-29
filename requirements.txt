@@ -1,4 +1,26 @@
-pwntools>=4.12.0
-rich>=13.0.0
-pefile>=2023.2.7
-boofuzz>=0.4.2
+# BinSmasher — Python dependencies
+# Install: pip install -r requirements.txt
+
+# ── Core (required) ───────────────────────────────────
+pwntools>=4.12
+rich>=13
+
+# ── Analysis (recommended) ────────────────────────────
+capstone>=5.0            # disassembly engine (used by pwntools internally)
+pefile>=2023.2.7         # PE/Windows binary parsing
+psutil>=5.9             # process management
+
+# ── Fuzzing (optional) ────────────────────────────────
+boofuzz>=0.4             # network protocol fuzzer (--fuzz)
+frida-tools>=12          # dynamic instrumentation (--frida)
+
+# ── Advanced analysis (optional) ───────────────────────
+angr>=9.2                # symbolic execution (--angr) [large install]
+claripy>=9.2             # constraint solver (pulled by angr)
+
+# ── Gadget finders (optional) ──────────────────────────
+ropper>=1.13             # ROP gadget finder
+ROPgadget>=7             # ROP gadget finder
+
+# ── Testing (optional) ────────────────────────────────
+pytest>=7                # unit test runner
