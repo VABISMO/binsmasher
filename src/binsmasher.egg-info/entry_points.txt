@@ -1,2 +1,2 @@
 [console_scripts]
-binsmasher = binsmasher_main:main
+binsmasher = main:main

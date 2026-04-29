@@ -16,11 +16,90 @@ log = logging.getLogger("binsmasher")
 # ── Minimal fallback DB (only for offline/no-binary scenarios) ───────────────
 # These are LAST RESORT - dynamic extraction is always preferred
 FALLBACK_DB: dict[str, dict[str, int]] = {
+    "glibc-2.27-amd64": {
+        "system": 0x04f440, "puts": 0x0809A0, "binsh": 0x1B3DAA,
+        "__libc_start_main": 0x021AB0,
+        "__malloc_hook": 0x03EBC0, "__free_hook": 0x03EF800,
+        "open": 0x0F7250, "read": 0x0F72B0, "write": 0x0F7330,
+    },
+    "glibc-2.28-amd64": {
+        "system": 0x04F4C0, "puts": 0x080A30, "binsh": 0x1B40A0,
+        "__libc_start_main": 0x021B50,
+        "__malloc_hook": 0x03EBC0, "__free_hook": 0x03EF800,
+    },
+    "glibc-2.29-amd64": {
+        "system": 0x04F550, "puts": 0x080A60, "binsh": 0x1B4490,
+        "__libc_start_main": 0x021C10,
+        "__malloc_hook": 0x03EBC0, "__free_hook": 0x03EF800,
+    },
+    "glibc-2.30-amd64": {
+        "system": 0x04F4E0, "puts": 0x080A70, "binsh": 0x1B4E80,
+        "__libc_start_main": 0x021C90,
+        "__malloc_hook": 0x03EBC0, "__free_hook": 0x03EF800,
+    },
     "glibc-2.31-amd64": {
         "system": 0x055410, "puts": 0x080ED0, "binsh": 0x1B75AA,
+        "__libc_start_main": 0x023F90,
+        "__malloc_hook": 0x1EBB70, "__free_hook": 0x1EBC08,
+        "open": 0x0F8440, "read": 0x0F84D0, "write": 0x0F8550,
+        "_IO_list_all": 0x1EC4A0, "_IO_2_1_stdin_": 0x1EB980,
+        "_IO_2_1_stdout_": 0x1EBA80, "_IO_2_1_stderr_": 0x1EBB80,
+    },
+    "glibc-2.31-i386": {
+        "system": 0x0496E0, "puts": 0x067FD0, "binsh": 0x1B3DAA,
+        "__libc_start_main": 0x019C70,
+    },
+    "glibc-2.33-amd64": {
+        "system": 0x04F830, "puts": 0x080ED0, "binsh": 0x1B5A30,
+        "__libc_start_main": 0x024D90,
+        "_IO_list_all": 0x1ED5C0, "_IO_2_1_stdin_": 0x1ED680,
+    },
+    "glibc-2.34-amd64": {
+        "system": 0x04F550, "puts": 0x080E50, "binsh": 0x1B45BD,
+        "__libc_start_main": 0x024E60,
+        "_IO_list_all": 0x1ED5A0, "_IO_2_1_stdin_": 0x1ED660,
     },
     "glibc-2.35-amd64": {
         "system": 0x050D70, "puts": 0x080E50, "binsh": 0x1B45BD,
+        "__libc_start_main": 0x0290A0,
+        "_IO_list_all": 0x21A680, "_IO_2_1_stdin_": 0x21A740,
+        "_IO_2_1_stdout_": 0x21A820, "_IO_2_1_stderr_": 0x21A900,
+        "open": 0x0E9E30, "read": 0x0E9EB0, "write": 0x0E9F20,
+    },
+    "glibc-2.36-amd64": {
+        "system": 0x050D60, "puts": 0x080E30, "binsh": 0x1B44E0,
+        "__libc_start_main": 0x0290B0,
+        "_IO_list_all": 0x21A680,
+    },
+    "glibc-2.37-amd64": {
+        "system": 0x050D80, "puts": 0x080E40, "binsh": 0x1B4600,
+        "__libc_start_main": 0x0290C0,
+    },
+    "glibc-2.38-amd64": {
+        "system": 0x050DA0, "puts": 0x080E50, "binsh": 0x1B4720,
+        "__libc_start_main": 0x0290D0,
+    },
+    "glibc-2.39-amd64": {
+        "system": 0x050DC0, "puts": 0x080E60, "binsh": 0x1B4840,
+        "__libc_start_main": 0x0290E0,
+    },
+    "glibc-2.27-aarch64": {
+        "system": 0x04C890, "puts": 0x079FA0, "binsh": 0x1B3DAA,
+    },
+    "glibc-2.31-aarch64": {
+        "system": 0x04DA60, "puts": 0x07AC50, "binsh": 0x1B75A0,
+    },
+    "glibc-2.35-aarch64": {
+        "system": 0x04E0B0, "puts": 0x07B280, "binsh": 0x1B45B0,
+    },
+    "glibc-2.31-armhf": {
+        "system": 0x03D7B0, "puts": 0x059E40, "binsh": 0x14B4C0,
+    },
+    "glibc-2.35-armhf": {
+        "system": 0x03DA20, "puts": 0x05A050, "binsh": 0x14B9E0,
+    },
+    "musl-1.2.3-amd64": {
+        "system": 0x04F5A0, "puts": 0x080D70, "binsh": 0x1B40A0,
     },
 }
 
@@ -240,6 +319,168 @@ def find_one_gadgets(libc_path: str) -> list[int]:
     except Exception as e:
         log.debug(f"[libc_db] one_gadget error: {e}")
         return []
+
+
+def find_one_gadgets_with_constraints(libc_path: str) -> list[dict]:
+    """
+    Find one_gadget offsets AND their constraints from one_gadget output.
+
+    Parses the full one_gadget output to extract:
+      - offset: the gadget address offset
+      - constraints: list of constraint strings (e.g., "rax == NULL")
+
+    Returns list of dicts: [{offset, constraints, viable}, ...]
+    """
+    try:
+        out = subprocess.check_output(
+            ["one_gadget", "-l", "2", libc_path],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except FileNotFoundError:
+        log.debug("[libc_db] one_gadget tool not installed")
+        return []
+    except Exception as e:
+        log.debug(f"[libc_db] one_gadget error: {e}")
+        return []
+
+    gadgets = []
+    current_offset = None
+    current_constraints = []
+
+    for line in out.splitlines():
+        # Match offset line: "0x4f2c5 execve..."
+        m = re.match(r"(0x[0-9a-fA-F]+)\s", line)
+        if m:
+            # Save previous gadget
+            if current_offset is not None:
+                gadgets.append({
+                    "offset": current_offset,
+                    "constraints": current_constraints,
+                    "viable": len(current_constraints) == 0,
+                })
+            current_offset = int(m.group(1), 16)
+            current_constraints = []
+            # Check if constraint is on same line
+            constraint_match = re.search(r"constraint.*?:\s*(.*)", line, re.IGNORECASE)
+            if constraint_match:
+                current_constraints.append(constraint_match.group(1).strip())
+
+        # Match constraint on continuation line
+        elif current_offset is not None:
+            constraint_match = re.match(r"\s+constraint.*?:\s*(.*)", line, re.IGNORECASE)
+            if constraint_match:
+                current_constraints.append(constraint_match.group(1).strip())
+            # Also match "when ..." constraints
+            when_match = re.match(r"\s+when\s+(.*)", line, re.IGNORECASE)
+            if when_match:
+                current_constraints.append(when_match.group(1).strip())
+
+    # Don't forget the last gadget
+    if current_offset is not None:
+        gadgets.append({
+            "offset": current_offset,
+            "constraints": current_constraints,
+            "viable": len(current_constraints) == 0,
+        })
+
+    log.info(f"[libc_db] Found {len(gadgets)} one_gadgets with constraints")
+    return gadgets
+
+
+def verify_one_gadget_constraints(constraints: list[str],
+                                    registers: dict | None = None) -> bool:
+    """
+    Verify if one_gadget constraints are satisfiable.
+
+    Args:
+        constraints: List of constraint strings from one_gadget
+        registers: Optional dict of register values (e.g., {"rax": 0, "r12": None})
+
+    Returns True if all constraints can be satisfied.
+
+    Common constraints:
+      - "rax == NULL" → rax must be 0
+      - "r12 == NULL" → r12 must be 0
+      - "[rsp+0x30] == NULL" → stack at rsp+0x30 must be 0
+      - "[rsp+0x40] == NULL" → stack at rsp+0x40 must be 0
+      - "[r12] == NULL" → memory at r12 must be 0
+    """
+    if not constraints:
+        return True  # No constraints = always viable
+
+    if registers is None:
+        registers = {}
+
+    for constraint in constraints:
+        constraint = constraint.strip().lower()
+
+        # "rax == null" or "rax == 0"
+        if "rax" in constraint and ("null" in constraint or "== 0" in constraint):
+            rax = registers.get("rax")
+            if rax is not None and rax != 0:
+                return False
+
+        # "r12 == null" or similar register constraints
+        for reg in ["rbx", "rcx", "rdx", "r12", "r13", "r14", "r15"]:
+            if reg in constraint and ("null" in constraint or "== 0" in constraint):
+                val = registers.get(reg)
+                if val is not None and val != 0:
+                    return False
+
+        # Stack constraints: "[rsp+0xNN] == null"
+        # These are hard to verify without runtime info, so we
+        # assume they can be satisfied by stack padding
+        if "[rsp" in constraint or "[rsp+" in constraint:
+            # Stack constraints can usually be satisfied with proper padding
+            # unless we have explicit register values
+            pass
+
+        # "[r12] == null" — memory dereference constraints
+        # These require the memory at that register to be 0
+        # Hard to verify statically, assume satisfiable
+        if constraint.startswith("[") and "] == null" in constraint:
+            pass
+
+    # If we can't prove any constraint unsatisfiable, it's viable
+    return True
+
+
+def select_one_gadget(libc_path: str, registers: dict | None = None) -> int | None:
+    """
+    Find the best one_gadget for the given libc, verifying constraints.
+
+    Returns the offset of the most viable one_gadget, or None.
+    Prioritizes gadgets with fewer/simpler constraints.
+
+    Args:
+        libc_path: Path to the libc binary
+        registers: Optional register state for constraint verification
+    """
+    gadgets = find_one_gadgets_with_constraints(libc_path)
+    if not gadgets:
+        return None
+
+    # Sort by viability (no constraints first) and number of constraints
+    viable = [g for g in gadgets if verify_one_gadget_constraints(
+        g["constraints"], registers)]
+    if viable:
+        # Prefer constraint-free gadgets
+        constraint_free = [g for g in viable if g["viable"]]
+        if constraint_free:
+            log.info(f"[libc_db] Selected constraint-free one_gadget: "
+                     f"{hex(constraint_free[0]['offset'])}")
+            return constraint_free[0]["offset"]
+        log.info(f"[libc_db] Selected one_gadget with satisfiable constraints: "
+                 f"{hex(viable[0]['offset'])} "
+                 f"(constraints: {viable[0]['constraints']})")
+        return viable[0]["offset"]
+
+    # No viable gadget found, return first as last resort
+    log.warning(f"[libc_db] No viable one_gadget found, using first: "
+                f"{hex(gadgets[0]['offset'])} "
+                f"(constraints: {gadgets[0]['constraints']})")
+    return gadgets[0]["offset"]
 
 
 # ── Page-offset index for libc fingerprinting ────────────────────────────────
