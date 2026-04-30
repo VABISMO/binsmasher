@@ -1,7 +1,8 @@
 Metadata-Version: 2.4
 Name: binsmasher
-Version: 4.2.0
+Version: 0.9.0
 Summary: Ultimate Cross-Platform Binary Exploitation Framework
+Home-page: https://github.com/VABISMO/binsmasher
 Author: ancientencoder
 License: MIT
 Project-URL: Homepage, https://github.com/VABISMO/binsmasher
@@ -9,6 +10,7 @@ Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: Developers
 Classifier: Intended Audience :: Information Technology
 Classifier: Topic :: Security
+Classifier: License :: OSI Approved :: MIT License
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.9
 Classifier: Programming Language :: Python :: 3.10
@@ -17,8 +19,24 @@ Classifier: Programming Language :: Python :: 3.12
 Classifier: Operating System :: POSIX :: Linux
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pwntools>=4.12
 Requires-Dist: rich>=13
-Requires-Dist: pwntools
+Requires-Dist: capstone>=5.0
+Requires-Dist: pefile>=2023.2.7
+Requires-Dist: psutil>=5.9
+Provides-Extra: fuzzing
+Requires-Dist: boofuzz>=0.4; extra == "fuzzing"
+Requires-Dist: frida-tools>=12; extra == "fuzzing"
+Provides-Extra: analysis
+Requires-Dist: angr>=9.2; extra == "analysis"
+Requires-Dist: claripy>=9.2; extra == "analysis"
+Requires-Dist: ropper>=1.13; extra == "analysis"
+Requires-Dist: ROPgadget>=7; extra == "analysis"
+Provides-Extra: dev
+Requires-Dist: pytest>=7; extra == "dev"
+Dynamic: home-page
+Dynamic: license-file
 Dynamic: requires-python
 
 # BinSmasher 🔨
@@ -41,10 +59,10 @@ Dynamic: requires-python
 | 🛡️ **Protection Bypass** | PIE, NX, ASLR, canary, RELRO, seccomp, CFI, SafeSEH |
 | 📊 **Binary Analysis** | Static analysis, gadget finding, libc fingerprinting, seccomp parsing |
 | ⚙️ **Fully Configurable** | Custom win function names, offset ranges, and exploit parameters via CLI |
-| 🔗 **Network Ready** | TCP, UDP, TLS support with adaptive timeouts |
-| 🧪 **Test Suite** | 27+ unit tests, 25+ integration tests, comprehensive coverage |
+| 🔗 **Network Ready** | TCP, UDP, HTTP, TLS support with adaptive timeouts |
+| 🧪 **Test Suite** | 245+ unit tests, 25+ integration tests, comprehensive coverage |
 | 📝 **Auto-Generated** | Exploit scripts, GDB scripts, crash scripts, CTF writeups |
-| 🔧 **Extensible** | Modular mixin architecture (23 mixins), easy to add new techniques |
+| 🔧 **Extensible** | Modular mixin architecture (25 mixins), easy to add new techniques |
 
 ---
 
@@ -160,13 +178,16 @@ binsmasher/
 │   │   ├── fsop.py                   # FSOP for glibc 2.34+ (House of Banana/Emma/Kiwi)
 │   │   ├── canary_leak.py            # Canary leak without fork-server
 │   │   ├── session.py                # Stateful menu/login service interaction
-│   │   └── udp_strategies.py         # UDP+spawn exploit engine (A–F)
+│   │   ├── udp_strategies.py         # UDP+spawn exploit engine (A–F)
+│   │   └── http_strategies.py        # HTTP+spawn exploit engine (A–E)
 │   │
 │   ├── fuzzer/
 │   │   ├── afl.py                    # AFL++ coverage fuzzing
 │   │   ├── boofuzz_fuzz.py           # boofuzz network fuzzing
 │   │   ├── mutation.py               # Built-in mutation fuzzer
 │   │   ├── udp.py                    # UDP offset detection (bisect + corefile)
+│   │   ├── http.py                   # HTTP payload template + offset detection
+│   │   ├── template_utils.py         # Protocol-agnostic {PAYLOAD} substitution + Content-Length
 │   │   ├── core_analysis.py          # Core dump analysis
 │   │   ├── gdb_scripts.py            # GDB script generation (pwndbg/peda/vanilla)
 │   │   ├── offset_roto.py            # ROTO heuristic, SIGFAULT analysis
@@ -238,8 +259,9 @@ binsmasher solana   [options]   # Agave/Solana SVM auditing
 | `--reverse-shell` | off | Reverse shell payload |
 | `--file-input` | — | Embed shellcode in `mp3` or `raw` file |
 | `--binary-args` | `""` | Arguments to pass to spawned binary |
-| `--payload-data` | — | Custom payload template (`{PAYLOAD}` placeholder for UDP+spawn) |
+| `--payload-data` | — | Custom payload template (`{PAYLOAD}` placeholder for injection) |
 | `--udp` | off | Send `--payload-data` via UDP |
+| `--http` | off | HTTP mode: send payload as HTTP request (e.g. `--http "POST /submit"`) |
 | `--spawn-target` | off | Spawn binary locally for crash detection |
 | `--bad-bytes` | `""` | Hex bytes to avoid in exploit addresses (e.g. `0a0d` for SIP) |
 | `--menu-script` | — | JSON interaction script for menu-based services |
@@ -401,6 +423,79 @@ binsmasher binary -b ./custom --host 127.0.0.1 --port 4444 \
 ## Exploit Techniques — UDP+Spawn Mode
 
 Activated with `--payload-data` + `--udp` + `--spawn-target`.
+
+| Strategy | Name | Viable when |
+|---|---|---|
+| A | **ret2system ROP** | `ret_offset + 24 < min_crash`, `pop rdi` available |
+| A* | **ret2csu fallback** | As above, no `pop rdi` — uses `__libc_csu_init` |
+| B | **SROP** | `syscall;ret` + `pop rax;ret`, frame fits in payload |
+| C | **GOT overwrite** | Pointer-overwrite crash pattern detected |
+| D | **ret2win** | Win symbol found, `ret_offset + 8 < min_crash` |
+| E | **one_gadget** | `one_gadget` installed, no bad bytes |
+| F | **ORW** | `--orw` flag, execve blocked by seccomp |
+
+---
+
+## Exploit Techniques — HTTP+Spawn Mode
+
+Activated with `--payload-data` + `--http` + `--spawn-target`.
+
+Same strategy cascade as UDP (A–E), but delivers exploits via HTTP over TCP.
+
+| Strategy | Name | Viable when |
+|---|---|---|
+| A | **ret2system ROP** | Stack overflow, `pop rdi` available |
+| B | **SROP** | `syscall;ret` + `pop rax;ret` |
+| C | **ret2win** | Win symbol found |
+| D | **one_gadget** | `one_gadget` installed |
+| E | **ORW** | `--orw` flag, seccomp detected |
+
+---
+
+## Custom Payload Mode — HTTP
+
+Use `--http` to send payloads as HTTP requests. Works with or without `--spawn-target`.
+
+### HTTP with spawn (offset detection + auto exploit)
+
+```bash
+# Template with {PAYLOAD} placeholder — auto-detects injection point
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http "POST /submit" \
+  --payload-data 'username=AAAA&data={PAYLOAD}' \
+  --spawn-target -t
+
+# Full HTTP template — Content-Length auto-recalculated
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http --spawn-target \
+  --payload-data "$(cat http_template.txt)" -t
+```
+
+### HTTP raw send (no spawn, no offset detection)
+
+```bash
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http "POST /login" \
+  --payload-data 'user=admin&data={PAYLOAD}'
+```
+
+When `--payload-data` already contains HTTP framing (starts with `POST`, `GET`, etc.), BinSmasher sends it as-is. Otherwise it wraps the body in HTTP/1.1 framing with `Content-Length` and `Connection: close`.
+
+### HTTP template example
+
+```
+POST /vuln HTTP/1.1
+Host: target
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 8
+
+data={PAYLOAD}
+```
+
+`Content-Length` is automatically recalculated after `{PAYLOAD}` substitution.
 
 | Strategy | Name | Viable when |
 |---|---|---|
@@ -642,6 +737,32 @@ binsmasher binary -b /path/to/sip_server \
   --payload-data "$(cat invite.txt)"
 ```
 
+### CTF — HTTP service with exploit
+
+```bash
+# Auto-detect offset and exploit via HTTP POST
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http "POST /submit" \
+  --payload-data 'user=AAAA&data={PAYLOAD}' \
+  --spawn-target -t
+
+# Full HTTP template with headers
+cat > http_template.txt << 'EOF'
+POST /vuln HTTP/1.1
+Host: target
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 8
+
+data={PAYLOAD}
+EOF
+
+binsmasher binary -b ./http_vuln \
+  --host 127.0.0.1 --port 8080 \
+  --http --spawn-target \
+  --payload-data "$(cat http_template.txt)" -t
+```
+
 ### Menu binary (heap CTF)
 
 ```bash
@@ -747,18 +868,62 @@ python tests/test_new_features.py
 
 ---
 
-## CVE Scanner
+## CVE Scanner — `binscan`
 
 <img width="1770" height="942" alt="image" src="https://github.com/user-attachments/assets/feacfd20-d743-4e29-96c4-42f9148ab327" />
 
 **Static-only binary vulnerability scanner for responsible disclosure.**
 
+Installed as the `binscan` command via `pip install`.
+
 ```bash
-python3 cve_scan.py                                # Scan /usr/bin
-python3 cve_scan.py /usr/sbin /opt/binaries        # Scan directories
-python3 cve_scan.py --single /tmp/vuln_binary      # Single binary
-python3 cve_scan.py --single ./target --confidence CONFIRMED --verbose
+# Scan default paths (/usr/bin, /usr/sbin, /lib/modules)
+binscan
+
+# Scan specific directories
+binscan /usr/sbin /opt/binaries
+
+# Audit a single binary
+binscan --single /tmp/vuln_binary
+
+# Custom output directory (default: ~/binscan_reports)
+binscan /usr/bin -o ~/my_reports
+
+# High-confidence only, verbose
+binscan --single ./target --confidence CONFIRMED -v
+
+# Skip taint analysis, threshold 100
+binscan /usr/bin /sbin --threshold 100 --no-taint
+
+# Skip HTML report generation
+binscan /usr/bin --no-html
 ```
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `paths` | `/usr/bin /usr/sbin /lib/modules` | Directories or files to scan |
+| `-o`, `--output-dir` | `~/binscan_reports` | Output directory for reports |
+| `--threshold` | `50` | Minimum risk score to include a binary |
+| `-v`, `--verbose` | off | Enable debug logging |
+| `--single BINARY` | — | Audit a single binary file |
+| `--no-taint` | off | Disable taint / data-flow analysis |
+| `--confidence` | `PROBABLE` | Minimum confidence: `CONFIRMED`, `PROBABLE`, `UNCONFIRMED` |
+| `--no-html` | off | Skip HTML report generation |
+
+### Output
+
+Reports are saved to `~/binscan_reports` (or custom `-o` path):
+
+| File | Description |
+|---|---|
+| `cve_audit_all_*.json` | All findings as JSON |
+| `cve_audit_confirmed_high_*.json` | CONFIRMED + High/Critical only |
+| `cve_audit_probable_high_*.json` | PROBABLE + High/Critical only |
+| `cve_mitre_*.md` | MITRE CVE submission templates (Markdown) |
+| `cve_mitre_json_*.json` | MITRE CVE 5.0 JSON templates |
+| `cve_audit_*.html` | Interactive HTML report with filters |
 
 Detects 25+ dangerous functions, applies taint analysis, generates CVSS-scored HTML/JSON/MITRE CVE output.
 

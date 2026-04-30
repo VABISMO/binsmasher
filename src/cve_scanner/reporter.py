@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-from models import VulnPoint, BinaryReport
-from scoring import _cvss_vector
+from .models import VulnPoint, BinaryReport
+from .scoring import _cvss_vector
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

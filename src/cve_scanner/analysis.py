@@ -16,7 +16,7 @@ import stat
 import subprocess
 from pathlib import Path
 
-from catalog import FORTIFY_MAP, KNOWN_CVES
+from .catalog import FORTIFY_MAP, KNOWN_CVES
 
 
 # ── Shell helper ───────────────────────────────────────────────────────────────

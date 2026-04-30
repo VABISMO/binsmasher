@@ -5,7 +5,7 @@ cve_scan.py — BinSmasher CVE Auditor CLI entry point.
 Usage:
   python3 cve_scan.py [paths…] [options]
 
-  -o / --output-dir    Output directory (default: ./cve_reports)
+  -o / --output-dir    Output directory (default: ~/binscan_reports)
   --threshold          Minimum risk score to include binary (default: 50)
   -v / --verbose       Debug logging
   --single BINARY      Audit a single binary
@@ -19,20 +19,20 @@ import os
 import re
 import sys
 
-from auditor import CVEAuditor, rprint
+from cve_scanner.auditor import CVEAuditor, rprint
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="cve_scan.py",
+        prog="binscan",
         description="BinSmasher CVE Auditor v3 — Static binary vulnerability scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 cve_scan.py /usr/bin
-  python3 cve_scan.py --single /tmp/vuln_test -v
-  python3 cve_scan.py /usr/bin /sbin --threshold 100 --confidence CONFIRMED
-  python3 cve_scan.py --single ./target --no-taint -o ./out
+  binscan /usr/bin
+  binscan --single /tmp/vuln_test -v
+  binscan /usr/bin /sbin --threshold 100 --confidence CONFIRMED
+  binscan --single ./target --no-taint -o ~/my_reports
 """,
     )
     parser.add_argument(
@@ -40,8 +40,8 @@ Examples:
         help="Directories or files to scan (default: /usr/bin /usr/sbin /lib/modules)",
     )
     parser.add_argument(
-        "-o", "--output-dir", default="./cve_reports",
-        help="Output directory for reports (default: ./cve_reports)",
+        "-o", "--output-dir", default=os.path.expanduser("~/binscan_reports"),
+        help="Output directory for reports (default: ~/binscan_reports)",
     )
     parser.add_argument(
         "--threshold", type=int, default=50,

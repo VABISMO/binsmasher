@@ -3,8 +3,8 @@
 scoring.py — CVSS scoring, severity classification, and risk computation.
 """
 
-from models import VulnPoint, BinaryReport
-from catalog import SEVERITY_THRESHOLDS
+from .models import VulnPoint, BinaryReport
+from .catalog import SEVERITY_THRESHOLDS
 
 
 def cvss_to_severity(score: float) -> str:

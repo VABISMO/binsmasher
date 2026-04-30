@@ -16,6 +16,7 @@ setup(
     entry_points={
         "console_scripts": [
             "binsmasher=binsmasher_main:main",
+            "binscan=cve_scanner.cve_scan:main",
         ],
     },
     install_requires=[

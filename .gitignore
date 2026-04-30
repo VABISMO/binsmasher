@@ -6,6 +6,9 @@ venv/
 .venv/
 env/
 
+## claude code
+.claude/
+
 # --- Python (Recursivo para todos los subdirectorios) ---
 **/__pycache__/
 *.py[cod]

@@ -827,18 +827,62 @@ python tests/test_new_features.py
 
 ---
 
-## CVE Scanner
+## CVE Scanner — `binscan`
 
 <img width="1770" height="942" alt="image" src="https://github.com/user-attachments/assets/feacfd20-d743-4e29-96c4-42f9148ab327" />
 
 **Static-only binary vulnerability scanner for responsible disclosure.**
 
+Installed as the `binscan` command via `pip install`.
+
 ```bash
-python3 cve_scan.py                                # Scan /usr/bin
-python3 cve_scan.py /usr/sbin /opt/binaries        # Scan directories
-python3 cve_scan.py --single /tmp/vuln_binary      # Single binary
-python3 cve_scan.py --single ./target --confidence CONFIRMED --verbose
+# Scan default paths (/usr/bin, /usr/sbin, /lib/modules)
+binscan
+
+# Scan specific directories
+binscan /usr/sbin /opt/binaries
+
+# Audit a single binary
+binscan --single /tmp/vuln_binary
+
+# Custom output directory (default: ~/binscan_reports)
+binscan /usr/bin -o ~/my_reports
+
+# High-confidence only, verbose
+binscan --single ./target --confidence CONFIRMED -v
+
+# Skip taint analysis, threshold 100
+binscan /usr/bin /sbin --threshold 100 --no-taint
+
+# Skip HTML report generation
+binscan /usr/bin --no-html
 ```
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `paths` | `/usr/bin /usr/sbin /lib/modules` | Directories or files to scan |
+| `-o`, `--output-dir` | `~/binscan_reports` | Output directory for reports |
+| `--threshold` | `50` | Minimum risk score to include a binary |
+| `-v`, `--verbose` | off | Enable debug logging |
+| `--single BINARY` | — | Audit a single binary file |
+| `--no-taint` | off | Disable taint / data-flow analysis |
+| `--confidence` | `PROBABLE` | Minimum confidence: `CONFIRMED`, `PROBABLE`, `UNCONFIRMED` |
+| `--no-html` | off | Skip HTML report generation |
+
+### Output
+
+Reports are saved to `~/binscan_reports` (or custom `-o` path):
+
+| File | Description |
+|---|---|
+| `cve_audit_all_*.json` | All findings as JSON |
+| `cve_audit_confirmed_high_*.json` | CONFIRMED + High/Critical only |
+| `cve_audit_probable_high_*.json` | PROBABLE + High/Critical only |
+| `cve_mitre_*.md` | MITRE CVE submission templates (Markdown) |
+| `cve_mitre_json_*.json` | MITRE CVE 5.0 JSON templates |
+| `cve_audit_*.html` | Interactive HTML report with filters |
 
 Detects 25+ dangerous functions, applies taint analysis, generates CVSS-scored HTML/JSON/MITRE CVE output.
 

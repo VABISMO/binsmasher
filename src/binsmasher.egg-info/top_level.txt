@@ -1,5 +1,6 @@
 analyzer
 binsmasher_main
+cve_scanner
 exploiter
 file_exploiter
 fuzzer

@@ -12,9 +12,9 @@ Modules:
   taint_analyzer — Static taint / data-flow analysis (optional)
 """
 
-from models import VulnPoint, BinaryReport
-from auditor import CVEAuditor
-from catalog import VULN_CATALOG, KNOWN_CVES, MITIGATIONS, DANGEROUS_CAPS
+from .models import VulnPoint, BinaryReport
+from .auditor import CVEAuditor
+from .catalog import VULN_CATALOG, KNOWN_CVES, MITIGATIONS, DANGEROUS_CAPS
 
 __all__ = [
     "VulnPoint",

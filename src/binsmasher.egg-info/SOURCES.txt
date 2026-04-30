@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 setup.py
@@ -23,6 +24,15 @@ src/binsmasher.egg-info/dependency_links.txt
 src/binsmasher.egg-info/entry_points.txt
 src/binsmasher.egg-info/requires.txt
 src/binsmasher.egg-info/top_level.txt
+src/cve_scanner/__init__.py
+src/cve_scanner/analysis.py
+src/cve_scanner/auditor.py
+src/cve_scanner/catalog.py
+src/cve_scanner/cve_scan.py
+src/cve_scanner/models.py
+src/cve_scanner/reporter.py
+src/cve_scanner/scoring.py
+src/cve_scanner/taint_analyzer.py
 src/exploiter/__init__.py
 src/exploiter/arm64.py
 src/exploiter/aslr_bypass.py
@@ -37,6 +47,7 @@ src/exploiter/heap.py
 src/exploiter/heap_advanced.py
 src/exploiter/heap_groom.py
 src/exploiter/helpers.py
+src/exploiter/http_strategies.py
 src/exploiter/i386.py
 src/exploiter/interactive.py
 src/exploiter/multistage.py
@@ -62,9 +73,11 @@ src/fuzzer/afl.py
 src/fuzzer/boofuzz_fuzz.py
 src/fuzzer/core_analysis.py
 src/fuzzer/gdb_scripts.py
+src/fuzzer/http.py
 src/fuzzer/mutation.py
 src/fuzzer/offset_roto.py
 src/fuzzer/solana.py
+src/fuzzer/template_utils.py
 src/fuzzer/udp.py
 src/utils/__init__.py
 src/utils/_console.py
@@ -76,6 +89,4 @@ src/utils/json_output.py
 src/utils/logging_setup.py
 src/utils/progress.py
 src/utils/writeup.py
-tests/test_integration.py
 tests/test_suite.py
-tests/test_units.py

@@ -16,10 +16,10 @@ from typing import Optional
 
 from dataclasses import asdict
 
-from models import VulnPoint, BinaryReport
-from catalog import VULN_CATALOG, MITIGATIONS, DANGEROUS_CAPS
-from scoring import cvss_to_severity, adjust_cvss, compute_risk_score, _cvss_vector
-from analysis import (
+from .models import VulnPoint, BinaryReport
+from .catalog import VULN_CATALOG, MITIGATIONS, DANGEROUS_CAPS
+from .scoring import cvss_to_severity, adjust_cvss, compute_risk_score, _cvss_vector
+from .analysis import (
     _run, file_hashes, detect_arch, check_protections,
     get_imported_symbols, get_strings_of_interest,
     find_vuln_addresses, get_disasm_context, suid_sgid_check,
@@ -35,7 +35,7 @@ from analysis import (
 
 # Taint analysis (optional)
 try:
-    from taint_analyzer import enrich_vuln_points
+    from .taint_analyzer import enrich_vuln_points
     HAS_TAINT = True
 except ImportError:
     HAS_TAINT = False
@@ -667,21 +667,21 @@ class CVEAuditor:
     # ── Export methods (delegate to reporter) ───────────────────────────
 
     def export_json_all(self, reports: list) -> Path:
-        from reporter import export_json_all
+        from .reporter import export_json_all
         return export_json_all(reports, self.output_dir, _ts)
 
     def export_json_confirmed_high(self, reports: list) -> Path:
-        from reporter import export_json_confirmed_high
+        from .reporter import export_json_confirmed_high
         return export_json_confirmed_high(reports, self.output_dir, _ts)
 
     def export_json_probable_high(self, reports: list) -> Path:
-        from reporter import export_json_probable_high
+        from .reporter import export_json_probable_high
         return export_json_probable_high(reports, self.output_dir, _ts)
 
     def export_mitre_templates(self, reports: list) -> Path:
-        from reporter import export_mitre_templates
+        from .reporter import export_mitre_templates
         return export_mitre_templates(reports, self.output_dir, _ts)
 
     def export_html(self, reports: list) -> Path:
-        from reporter import export_html
+        from .reporter import export_html
         return export_html(reports, self.output_dir, _ts)
