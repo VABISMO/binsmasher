@@ -118,7 +118,8 @@ class SeccompParser:
             "notes": [],
         }
         try:
-            status = open(f"/proc/{pid}/status").read()
+            with open(f"/proc/{pid}/status") as _sf:
+                status = _sf.read()
             m = re.search(r"Seccomp:\s+(\d+)", status)
             if m:
                 mode = int(m.group(1))
@@ -240,7 +241,7 @@ class SeccompParser:
             # BPF JEQ instruction pattern: 0x15 0x00 (jump if equal)
             # Usually: ld [0], jeq k ALLOW, return DENY
             i = 0
-            while i < len(data) - 8:
+            while i + 8 <= len(data):
                 # Look for BPF JEQ pattern
                 code, jt, jf, k = struct.unpack_from("<HBBI", data, i)
                 if code == 0x15 and 0 <= k <= 400:  # JEQ with syscall number

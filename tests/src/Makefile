@@ -2,7 +2,7 @@ CC      = gcc
 CFLAGS  = -w -g
 OUTDIR  = ../bins
 
-all: $(OUTDIR) t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 tsh trev
+all: $(OUTDIR) t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 t12 t13 t14 t15 tsh trev
 	@echo ""
 	@echo "All binaries compiled in $(OUTDIR)/"
 	@echo "Run tests: python3 tests/realtest.py --local-only"
@@ -55,6 +55,22 @@ t11: t11_heap_glibc234.c
 	$(CC) -o $(OUTDIR)/t11_heap_glibc234   $< -fno-stack-protector -no-pie $(CFLAGS)
 	@echo "  t11_heap_glibc234   NX=on   heap proto  port=14451  win=yes"
 
+t12: t12_fmtstr_fullrelro.c
+	$(CC) -o $(OUTDIR)/t12_fmtstr_fullrelro $< -fno-stack-protector -no-pie -z relro -z now $(CFLAGS)
+	@echo "  t12_fmtstr_fullrelro NX=on FullRELRO port=14452 win=yes"
+
+t13: t13_heap_menu.c
+	$(CC) -o $(OUTDIR)/t13_heap_menu       $< -fno-stack-protector -no-pie $(CFLAGS)
+	@echo "  t13_heap_menu       NX=on  heap-menu  port=14453 win=yes"
+
+t14: t14_off_by_one.c
+	$(CC) -o $(OUTDIR)/t14_off_by_one      $< -fno-stack-protector -no-pie $(CFLAGS)
+	@echo "  t14_off_by_one      NX=on  off-by-one port=14454 win=yes"
+
+t15: t15_canary_fmtstr.c
+	$(CC) -o $(OUTDIR)/t15_canary_fmtstr   $< -fstack-protector-all -no-pie $(CFLAGS)
+	@echo "  t15_canary_fmtstr   NX=on  canary+fmt port=14455 (WARN expected)"
+
 tsh: t_shellexec.c
 	$(CC) -o $(OUTDIR)/t_shellexec         $< -fno-stack-protector -no-pie $(CFLAGS)
 	@echo "  t_shellexec         CMD test            port=14461  win->system(id)"
@@ -67,6 +83,8 @@ clean:
 	rm -f $(OUTDIR)/t1_stack_noprotect $(OUTDIR)/t2_stack_nx $(OUTDIR)/t3_stack_canary \
 	       $(OUTDIR)/t4_fmtstr $(OUTDIR)/t5_heap $(OUTDIR)/t6_64bit_nx $(OUTDIR)/t7_cfi_vtable \
 	       $(OUTDIR)/t8_seccomp $(OUTDIR)/t9_stripped $(OUTDIR)/t10_safestack \
-	       $(OUTDIR)/t11_heap_glibc234 $(OUTDIR)/t_shellexec $(OUTDIR)/t_revshell
+	       $(OUTDIR)/t11_heap_glibc234 $(OUTDIR)/t12_fmtstr_fullrelro $(OUTDIR)/t13_heap_menu \
+	       $(OUTDIR)/t14_off_by_one $(OUTDIR)/t15_canary_fmtstr \
+	       $(OUTDIR)/t_shellexec $(OUTDIR)/t_revshell
 
-.PHONY: all clean t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 tsh trev
+.PHONY: all clean t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 t12 t13 t14 t15 tsh trev

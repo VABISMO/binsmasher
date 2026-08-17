@@ -303,7 +303,8 @@ def find_one_gadgets(libc_path: str) -> list[int]:
         out = subprocess.check_output(
             ["one_gadget", libc_path],
             stderr=subprocess.DEVNULL,
-            text=True
+            text=True,
+            timeout=120
         )
         gadgets = []
         for line in out.splitlines():
@@ -336,6 +337,7 @@ def find_one_gadgets_with_constraints(libc_path: str) -> list[dict]:
             ["one_gadget", "-l", "2", libc_path],
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=120,
         )
     except FileNotFoundError:
         log.debug("[libc_db] one_gadget tool not installed")

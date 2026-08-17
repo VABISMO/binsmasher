@@ -1,3 +1,0 @@
-[console_scripts]
-binscan = cve_scanner.cve_scan:main
-binsmasher = main:main

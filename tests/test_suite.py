@@ -56,6 +56,10 @@ LOCAL_BINS = {
     "t9_stripped":        (14449, WARN),  # stripped, no symbols, expected WARN
     "t10_safestack":      (14450, PASS),
     "t11_heap_glibc234":  (14451, PASS),
+    "t12_fmtstr_fullrelro": (14452, PASS),  # Full RELRO, ret2win (GOT untouched)
+    "t13_heap_menu":      (14453, PASS),    # direct overflow → ret2win
+    "t14_off_by_one":     (14454, PASS),    # off-by-one overflow → ret2win
+    "t15_canary_fmtstr":  (14455, WARN),    # canary leak via banner, expected WARN
 }
 
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mKABCDEFGHJSTfhilmnprsu]')
@@ -198,7 +202,9 @@ def success_in(out: str) -> bool:
     if "ret2win fired"     in out: return True
     if "dos_crash" in out and "Success" in out: return True
     info = extract_summary(out)
-    return info.get("Status", "") == "Success"
+    # Status is rendered as "✓  Success" / "⚠  ...Generated..." / "✗  Fail";
+    # the Unicode glyph survives strip_ansi, so compare by substring, not equality.
+    return "Success" in info.get("Status", "")
 
 def ran(out: str) -> bool:
     return "Exploit Type" in out and "Status" in out

@@ -452,15 +452,28 @@ def match_version_cves(component: str, version: str) -> list[dict]:
             return [int(p) for p in parts if p.isdigit()]
         v_installed = V(version)
 
+    # ver_range entries are comparator strings like "<2.38".
+    spec_re = re.compile(r'^([<>=!]+)\s*(.+)$')
     for cve in cves:
-        for ver_op, *ver_vals in cve.get("ver_range", []):
-            for ver_val in ver_vals if ver_vals else [ver_op]:
-                try:
-                    v_threshold = V(ver_val) if not isinstance(V("1.0"), list) else V(ver_val)
-                    if ver_op == "<" and v_installed < v_threshold:
-                        hits.append(cve)
-                except Exception:
-                    pass
+        for spec in cve.get("ver_range", []):
+            m = spec_re.match(str(spec))
+            if not m:
+                continue
+            op, ver_val = m.group(1), m.group(2).strip()
+            try:
+                v_threshold = V(ver_val)
+                if op == "<" and v_installed < v_threshold:
+                    hits.append(cve)
+                elif op == "<=" and v_installed <= v_threshold:
+                    hits.append(cve)
+                elif op == ">" and v_installed > v_threshold:
+                    hits.append(cve)
+                elif op == ">=" and v_installed >= v_threshold:
+                    hits.append(cve)
+                elif op in ("=", "==") and v_installed == v_threshold:
+                    hits.append(cve)
+            except Exception:
+                pass
     return hits
 
 

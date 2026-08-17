@@ -241,6 +241,7 @@ class UDPMixin:
                     ),
                     host=_host,
                     port=_port,
+                    use_udp=True,
                 )
                 if _gdb_result:
                     log.info(f"  GDB crash analysis:\n{_gdb_result}")
@@ -473,6 +474,7 @@ class UDPMixin:
             _gdb_out = self._auto_gdb_crash_analysis(
                 binary=binary, binary_args=binary_args,
                 crash_payload=_crash_payload, host=_host, port=_port,
+                use_udp=True,
             )
             if _gdb_out and "===CRASH_START===" in _gdb_out:
                 _rip_match = _re_local.search(r'rip\s+0x([0-9a-fA-F]+)', _gdb_out)
@@ -503,6 +505,7 @@ class UDPMixin:
                     pie_base=_pie_base,
                     use_placeholder=_use_placeholder,
                     inj_start=inj_start, inj_len=inj_len, inj_byte=inj_byte,
+                    use_udp=True,
                 )
                 if _found_brute is not None:
                     found_offset = _found_brute
@@ -539,7 +542,7 @@ class UDPMixin:
                 "find_offset_udp_payload: could not determine offset.\n"
                 "  • Verify core dumps are enabled: ulimit -c unlimited\n"
                 "  • Verify the cyclic pattern reaches RIP (the injection field may not\n"
-                "    injection field may be past the overflow point — adjust manually)\n"
+                "    reach the overflow point — adjust manually)\n"
                 f"  • Injection field: template[{inj_start}:{inj_start + inj_len}] "
                 f"({inj_len}B of 0x{inj_byte:02x})"
             )

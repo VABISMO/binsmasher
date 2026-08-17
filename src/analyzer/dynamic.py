@@ -66,6 +66,7 @@ targets.forEach(function(fn){
 });
 """
         cmd = [self.binary] + binary_args if binary_args else [self.binary]
+        proc = None
         try:
             import subprocess as sp
             proc = sp.Popen(cmd, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
@@ -87,3 +88,14 @@ targets.forEach(function(fn){
         except Exception as e:
             log.warning(f"Frida attach failed: {e}")
             return False
+        finally:
+            # Ensure the spawned process never leaks if attach/setup failed
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass

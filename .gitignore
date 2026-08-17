@@ -36,3 +36,16 @@ malicious*
 .idea/
 .DS_Store
 
+# --- Exploit research artifacts (keep local, never push to GitHub) ---
+# Ignore ALL untracked exploit dev/iteration files. Already-tracked files
+# (e.g. exploits/cve-2026-25994/README.md, pjsip-cve-2026-25994.py) stay tracked.
+# To publish a specific CVE writeup/exploit later, use: git add -f <path>
+exploits/
+*.orig
+*.new
+*.swp
+*.swo
+*~
+# Editor/session junk
+*.tmp
+

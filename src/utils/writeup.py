@@ -156,8 +156,8 @@ Target: `{binary_name}` running on `{host}:{port}`
 
 BinSmasher identified the vulnerability by:
 {
-    "- Bisecting the input size to find crash boundary\\n- Collecting a core dump and scanning stack for cyclic pattern" if vuln_type == "STACK_OVERFLOW"
-    else "- Sending `%p.%p.%p.%p` and detecting `0x7f...` / `0x555...` in the response\\n- Finding the exact format string argument index via `AAAA%N$p`" if vuln_type == "FORMAT_STRING"
+    "- Bisecting the input size to find crash boundary\n- Collecting a core dump and scanning stack for cyclic pattern" if vuln_type == "STACK_OVERFLOW"
+    else "- Sending `%p.%p.%p.%p` and detecting `0x7f...` / `0x555...` in the response\n- Finding the exact format string argument index via `AAAA%N$p`" if vuln_type == "FORMAT_STRING"
     else "- Detecting a crash on heap-sized inputs that does not occur on smaller inputs" if vuln_type == "HEAP_OVERFLOW"
     else "- Automatic probing of the service with crafted inputs"
 }

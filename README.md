@@ -131,7 +131,7 @@ binsmasher/
 │   │   ├── interactive.py            # Interactive shell + solve template
 │   │   ├── brute_aslr.py             # ASLR brute (PIE base / libc / partial overwrite)
 │   │   ├── aslr_bypass.py            # Automatic ASLR/PIE bypass (fmtstr leak, libc ID)
-│   │   ├── win_detector.py           # Automatic win function detection (39+ patterns)
+│   │   ├── win_detector.py           # Automatic win function detection (36 patterns)
 │   │   ├── i386.py                   # Correct 32-bit ROP chains (cdecl, int 0x80, SROP)
 │   │   ├── arm64.py                  # AArch64 exploit primitives (svc, SROP, gadgets)
 │   │   ├── fsop.py                   # FSOP for glibc 2.34+ (House of Banana/Emma/Kiwi)
@@ -160,14 +160,10 @@ binsmasher/
 │       ├── scripts_fmt.py            # PY, JS, PHP, LUA, RB
 │       └── archives.py               # ZIP, TAR, ELF, RAW
 │
-├── binsmasher/
-│   └── __init__.py                   # Python library API (BinSmasher class)
-│
 ├── tests/
 │   ├── test_suite.py                 # Integration test runner
-│   ├── test_new_features.py          # Unit/integration tests for new modules
 │   ├── bins/                         # Compiled test binaries
-│   └── src/                          # 13 C test sources + Makefile
+│   └── src/                          # 17 C test sources + Makefile
 │
 ├── Dockerfile
 ├── docker-compose.yml
@@ -298,7 +294,7 @@ binsmasher solana   [options]   # Agave/Solana SVM auditing
 
 ## Win Function Detection
 
-BinSmasher automatically detects win functions using 39+ built-in patterns:
+BinSmasher automatically detects win functions using 36 built-in patterns:
 
 ```
 win, flag, shell, backdoor, secret, easy, print_flag, cat_flag,
@@ -375,7 +371,7 @@ binsmasher binary -b ./custom --host 127.0.0.1 --port 4444 \
 | 41 | **Largebin attack** | `--largebin-attack`, glibc ≥ 2.28 |
 | 42 | **Format string leak** | Auto-detect fmtstr vuln, leak libc/stack addresses |
 | 43 | **PIE base calc** | Calculate PIE base from leaked code pointer |
-| 44 | **Win function detection** | Auto-detect 39+ win function patterns, configurable via CLI |
+| 44 | **Win function detection** | Auto-detect 36 win function patterns, configurable via CLI |
 
 ---
 
@@ -514,50 +510,48 @@ binsmasher binary -b ./heap_menu --host 127.0.0.1 --port 4444 -t \
 
 ## Python API
 
+The primary interface is the `binsmasher` CLI (see `binsmasher --help`). For
+programmatic use, `ExploitGenerator` is the main entry point — there is no
+`BinSmasher` facade class.
+
 ```python
-from binsmasher import BinSmasher
 from exploiter import ExploitGenerator, DEFAULT_WIN_PATTERNS
 
-# Analyze with default settings
-bs = BinSmasher("./vuln", host="ctf.io", port=4444)
-bs.analyze()
-bs.detect_vuln()
-
-# Find offset + canary
-offset = bs.find_offset()
-canary = bs.leak_canary()   # tries fmtstr, stack read, fork brute
-
-# Build and send exploit
-chain = bs.build_rop("auto")   # auto-selects: win → system → srop → execve
-bs.send(chain)
-bs.interactive()
-
-# Two-stage
-ok, etype = bs.multistage()
-
-# Output
-bs.template()          # → solve_vuln.py
-bs.save_json()         # → result.json
-bs.save_writeup()      # → writeup_vuln.md
-
-# === Advanced: Custom win function detection ===
-
-# Use ExploitGenerator directly with custom parameters
 eg = ExploitGenerator(
-    binary="./custom_chall",
+    binary="./vuln",
     platform="linux",
     host="ctf.io",
     port=4444,
     log_file="/tmp/bs.log",
     tls=False,
     binary_args="",
-    win_names=["get_flag", "print_flag", "solve"],  # Custom win function names
-    offset_range=(16, 256, 16)  # Custom offset range: min, max, step
+    win_names=["get_flag", "print_flag", "solve"],  # custom win function names
+    offset_range=(16, 256, 16)                       # custom offset range: min, max, step
 )
 
-# Check default win patterns (39+ built-in)
+# 1) Find the crash offset (cyclic pattern)
+offset = eg.find_offset(pattern_size=200, functions=[])
+
+# 2) Leak the stack canary if present (tries fmtstr, stack read, fork brute)
+canary = eg.leak_canary(offset=offset)
+
+# 3) Build + fire the exploit via the master strategy cascade.
+#    create_exploit auto-selects: ret2win -> ret2libc -> SROP -> execve ->
+#    ret2dlresolve -> one_gadget -> format-string (incl. Full RELRO) -> heap/FSOP.
+success, exploit_type, used_function = eg.create_exploit(
+    offset=offset, shellcode=None, return_addr=None, test_exploit=True,
+    return_offset=None, nx=True, aslr=True, canary_enabled=False,
+    format_string_payload=None, functions=[], file_input=None,
+    canary=canary, relro="Partial RELRO", safeseh=False, cfg=False,
+    findings={}, base_addr=None, offsets={})
+
+# 4) Emit a standalone solve script (JSON / writeup via the CLI flags).
+solve_script = eg.generate_template(
+    offset, canary, None, {}, exploit_type or "ret2win", "./vuln", [])
+
+# Default win patterns (36 built-in)
 print(DEFAULT_WIN_PATTERNS)
-# ['win', 'flag', 'shell', 'backdoor', 'secret', 'easy', ...]
+# ['win', 'flag', 'shell', 'backdoor', 'secret', 'easy', 'print_flag', 'cat_flag', ...]
 ```
 
 ---
@@ -749,11 +743,8 @@ python tests/test_suite.py --local-only --skip-slow
 # 3. Full local tests
 python tests/test_suite.py --local-only
 
-# 4. Full suite + CTF binary downloads
+# 4. Full suite (local + CTF binary downloads; t12-t15 cover Full RELRO, heap, off-by-one, canary)
 python tests/test_suite.py
-
-# 5. New feature unit/integration tests
-python tests/test_new_features.py
 ```
 
 ### Expected results
@@ -795,7 +786,7 @@ python tests/test_new_features.py
 ### What Works Automatically
 | Binary Type | Success Rate | Notes |
 |-------------|---------------|-------|
-| ret2win (symbols) | ✅ 100% | Auto-detects 39+ win patterns |
+| ret2win (symbols) | ✅ 100% | Auto-detects 36 win patterns |
 | NX + canary (banner leak) | ✅ 100% | Parses `COOKIE:0x...` from banner |
 | Format string | ✅ 95% | Partial/Full RELRO supported |
 | PIE + leak in output | ✅ 90% | Same-connection exploit |

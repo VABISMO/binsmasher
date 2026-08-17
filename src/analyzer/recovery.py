@@ -35,7 +35,8 @@ class RecoveryMixin:
                 "aarch64": [b"\xFF\x03\x01\xD1",  b"\xFD\x7B\xBF\xA9"],
             }
             prologues = arch_prologues.get(self.arch, arch_prologues["amd64"])
-            data = open(self.binary, "rb").read()
+            with open(self.binary, "rb") as _bf:
+                data = _bf.read()
             for prologue in prologues:
                 idx = 0
                 while True:
@@ -90,7 +91,8 @@ class RecoveryMixin:
                         continue
                     fpath = os.path.join(root, fname)
                     try:
-                        content = open(fpath, encoding="utf-8", errors="ignore").read()
+                        with open(fpath, encoding="utf-8", errors="ignore") as _sf:
+                            content = _sf.read()
                         n = content.count("unsafe")
                         if n:
                             unsafe_total += n

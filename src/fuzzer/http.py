@@ -249,13 +249,14 @@ class HTTPMixin:
             _bin_basename = os.path.basename(binary)
             try:
                 with open(f"/proc/{p.pid}/maps") as _mf:
-                    for _line in _mf:
+                    _maps_lines = _mf.readlines()
+                    for _line in _maps_lines:
                         if _bin_basename in _line and ("r-xp" in _line or "r--p" in _line):
                             _pie_base = int(_line.split("-")[0].strip(), 16)
                             log.info(f"[http] PIE base: {hex(_pie_base)}")
                             break
                     if _pie_base is None:
-                        for _line in _mf:
+                        for _line in _maps_lines:
                             if "r-xp" in _line:
                                 _pie_base = int(_line.split("-")[0].strip(), 16)
                                 break
@@ -383,6 +384,7 @@ class HTTPMixin:
             _gdb_out = self._auto_gdb_crash_analysis(
                 binary=binary, binary_args=binary_args,
                 crash_payload=crafted, host=_host, port=_port,
+                use_udp=False,
             )
             if _gdb_out and "===CRASH_START===" in _gdb_out:
                 import re as _re
@@ -408,6 +410,7 @@ class HTTPMixin:
                     pie_base=_pie_base,
                     use_placeholder=_use_placeholder,
                     inj_start=inj_start, inj_len=inj_len, inj_byte=inj_byte,
+                    use_udp=False,
                 )
                 if _found_brute is not None:
                     found_offset = _found_brute

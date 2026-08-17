@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binsmasher"
-version = "0.9.1"
+version = "0.9.2"
 description = "Ultimate Cross-Platform Binary Exploitation Framework"
 readme = "README.md"
 license = {text = "MIT"}
@@ -49,11 +49,14 @@ dev = [
 ]
 
 [project.scripts]
-binsmasher = "main:main"
+binsmasher = "binsmasher_main:main"
 binscan = "cve_scanner.cve_scan:main"
 
 [project.urls]
 Homepage = "https://github.com/VABISMO/binsmasher"
+
+[tool.setuptools]
+py-modules = ["main", "binsmasher_main", "constants", "exceptions"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -62,6 +62,13 @@ class ProtectionsMixin:
         relro = "No RELRO"
         fortify = "Disabled"
         shadow_stack = "Disabled"
+        # ASLR is a kernel setting (independent of the binary's PIE flag);
+        # the old code conflated ASLR with PIE — read the real value here.
+        try:
+            with open("/proc/sys/kernel/randomize_va_space") as _f:
+                aslr = int(_f.read().strip()) >= 1
+        except Exception:
+            aslr = True  # assume ASLR on if unreadable
         try:
             re_out = subprocess.check_output(["readelf", "-W", "-l", self.binary],
                                              stderr=subprocess.DEVNULL).decode(errors="ignore")
@@ -81,9 +88,8 @@ class ProtectionsMixin:
             cs = subprocess.check_output(["checksec", "--file", self.binary],
                                          stderr=subprocess.STDOUT).decode(errors="ignore")
             nx = nx or ("NX enabled" in cs)
-            aslr = "PIE enabled" in cs
             canary = "Canary found" in cs
-            pie = aslr
+            pie = "PIE enabled" in cs
             fortify = "Fortified" if "FORTIFY" in cs else "Disabled"
             if "Full RELRO" in cs:
                 relro = "Full RELRO"
@@ -121,7 +127,7 @@ class ProtectionsMixin:
         nx = bool(dc & 0x0100)
         aslr = bool(dc & 0x0040)
         canary = bool(dc & 0x10000)
-        safeseh = "Enabled" if dc & 0x0400 else "Disabled"
+        safeseh = "Disabled" if dc & 0x0400 else "Enabled"
         cfg = "Enabled" if dc & 0x4000 else "Disabled"
         return nx, aslr, canary, safeseh, cfg, aslr
 
