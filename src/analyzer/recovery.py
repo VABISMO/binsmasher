@@ -48,17 +48,20 @@ class RecoveryMixin:
                     idx += len(prologue)
         except Exception as e:
             log.warning(f"  prologue scan: {e}")
-        try:
-            import angr
-            proj = angr.Project(self.binary, auto_load_libs=False)
-            cfg = proj.analyses.CFGFast()
-            for addr, fn in list(cfg.functions.items())[:50]:
-                if not any(a == addr for a, _ in recovered):
-                    recovered.append((addr, fn.name or f"angr_{hex(addr)}"))
-        except ImportError:
-            pass
-        except Exception as e:
-            log.warning(f"  angr: {e}")
+        # angr CFGFast is expensive (~5-30s + large dep). Only run when the user
+        # opts in via --angr; r2 + prologue scan already cover most cases.
+        if getattr(self, "use_angr", False):
+            try:
+                import angr
+                proj = angr.Project(self.binary, auto_load_libs=False)
+                cfg = proj.analyses.CFGFast()
+                for addr, fn in list(cfg.functions.items())[:50]:
+                    if not any(a == addr for a, _ in recovered):
+                        recovered.append((addr, fn.name or f"angr_{hex(addr)}"))
+            except ImportError:
+                log.debug("  angr not installed — skipping CFGFast recovery")
+            except Exception as e:
+                log.warning(f"  angr: {e}")
         log.info(f"Stripped: {len(recovered)} candidates")
         return recovered
 

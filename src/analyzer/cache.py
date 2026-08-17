@@ -12,7 +12,10 @@ import time
 log = logging.getLogger("binsmasher")
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".binsmasher_cache")
-CACHE_VERSION = 2
+# Bumped 2→3: static_analysis now recovers stripped-binary functions instead
+# of faking "main"@0, and win detection uses xref/body-scan. Old caches hold
+# stale (empty/fake) function lists for stripped binaries, so invalidate them.
+CACHE_VERSION = 3
 MAX_AGE_SECONDS = 86400 * 7   # 1 week
 
 

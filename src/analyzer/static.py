@@ -88,8 +88,21 @@ class StaticAnalysisMixin:
         functions = self._list_functions()
         findings["all_functions"] = functions
         if not functions:
-            log.warning("No functions detected — binary may be stripped.")
-            return findings, None, []
+            log.warning("No functions detected — binary may be stripped. "
+                        "Attempting function recovery (r2 + prologue scan%s)."
+                        % (" + angr" if getattr(self, "use_angr", False) else ""))
+            try:
+                recovered = self.recover_functions_stripped()
+            except Exception as _re:
+                log.warning(f"Function recovery failed: {_re}")
+                recovered = []
+            if recovered:
+                # recover_functions_stripped returns [(addr, name)]; normalize
+                functions = [(name, addr) for addr, name in recovered if addr]
+                findings["all_functions"] = functions
+                log.info(f"Recovered {len(functions)} function candidates.")
+            if not functions:
+                return findings, None, []
         priority_keywords = ["vuln", "vulnerable", "overflow", "bof", "gets", "unsafe",
                              "main", "handle", "client", "process", "input", "recv", "read",
                              "transaction", "execute", "svm", "borsh"]
@@ -160,7 +173,10 @@ class StaticAnalysisMixin:
                 return fns
         except Exception:
             pass
-        return [("main", 0x0)]
+        # No symbols found (fully stripped). Return [] so static_analysis()
+        # triggers recover_functions_stripped() rather than faking a "main" at
+        # address 0 — which silently misdirects every win/ROP path.
+        return []
 
     def _parse_function_list(self, raw):
         fns = []

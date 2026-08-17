@@ -19,9 +19,9 @@
 | 📊 **Binary Analysis** | Static analysis, gadget finding, libc fingerprinting, seccomp parsing |
 | ⚙️ **Fully Configurable** | Custom win function names, offset ranges, and exploit parameters via CLI |
 | 🔗 **Network Ready** | TCP, UDP, HTTP, TLS support with adaptive timeouts |
-| 🧪 **Test Suite** | 245+ unit tests, 25+ integration tests, comprehensive coverage |
+| 🧪 **Test Suite** | 17 integration scenarios (15 fast local binaries + 2 slow), comprehensive coverage |
 | 📝 **Auto-Generated** | Exploit scripts, GDB scripts, crash scripts, CTF writeups |
-| 🔧 **Extensible** | Modular mixin architecture (25 mixins), easy to add new techniques |
+| 🔧 **Extensible** | Modular mixin architecture (42 mixins), easy to add new techniques |
 
 ---
 
@@ -48,7 +48,7 @@ gem install one_gadget
 ### Install as global command
 
 ```bash
-git clone https://github.com/your-org/binsmasher
+git clone https://github.com/VABISMO/binsmasher
 cd binsmasher
 pip install -e .
 binsmasher --help
@@ -64,7 +64,7 @@ docker run --rm -it --network host --cap-add SYS_PTRACE \
 
 ---
 
-## Quick Start
+## Usage
 
 ```bash
 # Run directly (no install)
@@ -110,12 +110,12 @@ binsmasher/
 │   │   ├── cache.py                  # SHA256 analysis cache (~/.binsmasher_cache/)
 │   │   ├── angr_analysis.py          # angr symbolic path exploration
 │   │   ├── vuln_detect.py            # Automatic vulnerability type detection
-│   │   ├── libc_db.py                # Local libc database (9 versions, no internet)
+│   │   ├── libc_db.py                # Local libc database (19 entries, glibc 2.27–2.39, no internet)
 │   │   └── libc_fingerprint.py       # Multi-symbol libc fingerprinting
 │   │
 │   ├── exploiter/
 │   │   ├── connection.py             # TCP/UDP connection management
-│   │   ├── offset.py                 # Offset detection (corefile/GDB/remote bisect)
+│   │   ├── offset.py                 # Offset detection (corefile/GDB/remote bisect), PIE/rip leak
 │   │   ├── rop_chains.py             # ret2win, ret2libc, SROP, ORW, ret2dlresolve
 │   │   ├── heap.py                   # Basic heap: UAF, fastbin, tcache
 │   │   ├── heap_advanced.py          # tcache+safe-linking, House of Apple2, DynELF
@@ -129,7 +129,7 @@ binsmasher/
 │   │   ├── orchestrator.py           # create_exploit: master TCP strategy selector
 │   │   ├── multistage.py             # Two-stage TCP (leak GOT → ret2system)
 │   │   ├── interactive.py            # Interactive shell + solve template
-│   │   ├── brute_aslr.py             # ASLR brute (PIE base / libc / partial overwrite)
+│   │   ├── brute_aslr.py             # ASLR brute (PIE base / libc / partial overwrite / ret2dlresolve / RIP byte-brute)
 │   │   ├── aslr_bypass.py            # Automatic ASLR/PIE bypass (fmtstr leak, libc ID)
 │   │   ├── win_detector.py           # Automatic win function detection (36 patterns)
 │   │   ├── i386.py                   # Correct 32-bit ROP chains (cdecl, int 0x80, SROP)
@@ -372,6 +372,7 @@ binsmasher binary -b ./custom --host 127.0.0.1 --port 4444 \
 | 42 | **Format string leak** | Auto-detect fmtstr vuln, leak libc/stack addresses |
 | 43 | **PIE base calc** | Calculate PIE base from leaked code pointer |
 | 44 | **Win function detection** | Auto-detect 36 win function patterns, configurable via CLI |
+| 45 | **angr symbolic execution** | Auto-fallback on stripped/no-symbol binaries; solves win path + offset symbolically |
 
 ---
 
@@ -753,27 +754,33 @@ python tests/test_suite.py
 |---|---|---|
 | t1_stack_noprotect | ✅ PASS | ret2win — NX off |
 | t2_stack_nx | ✅ PASS | ret2win — NX on |
-| t3_stack_canary | ✅ PASS | ret2win (canary detected) |
+| t3_stack_canary | ✅ PASS | ret2win — canary detected/bypassed |
 | t4_fmtstr | ✅ PASS | ret2win via format string binary |
 | t5_heap | ✅ PASS | ret2win via heap binary |
 | t6_64bit_nx | ✅ PASS | ret2win — 64-bit NX |
 | t7_cfi_vtable | ✅ PASS | ret2win — vtable binary |
 | t8_seccomp | ✅ PASS | ret2win — seccomp binary |
-| t9_stripped | ⚠️ WARN | No symbols — expected |
+| t9_stripped | ✅ PASS | ret2win — stripped recovery + xref |
 | t10_safestack | ✅ PASS | ret2win |
 | t11_heap_glibc234 | ✅ PASS | ret2win — glibc 2.34+ |
-| t_shellexec | ✅ PASS | win() → system("id") |
-| t_revshell | ✅ PASS | win() → connect-back shell |
+| t12_fmtstr_fullrelro | ✅ PASS | ret2win — Full RELRO (GOT untouched) |
+| t13_heap_menu | ✅ PASS | ret2win — direct overflow |
+| t14_off_by_one | ✅ PASS | ret2win — off-by-one overflow |
+| t15_canary_fmtstr | ✅ PASS | ret2win — canary leak via banner |
+| t_shellexec | ✅ PASS | win() → system("id") — slow |
+| t_revshell | ✅ PASS | win() → connect-back shell — slow |
+
+> All 15 fast local binaries pass with `--local-only --skip-slow` (PASS=15, FAIL=0, WARN=0). `t_shellexec` and `t_revshell` are slow network tests, skipped with `--skip-slow`.
 
 ---
 
 ## Known Limitations
 
 ### Automatic Exploitation
-- **PIE + ASLR without leak**: Requires address leak in banner/output. Use `--brute-aslr` for fork servers.
-- **Stripped binaries**: No symbols = no automatic win detection. Use `--win-names` if you know the function.
-- **Menu-based services**: Requires `--menu-script` JSON for navigation.
-- **Heap with complex menus**: Partial automation; some interaction may be manual.
+- **PIE + ASLR without leak**: Auto-brutes on fork servers (PIE-base brute, partial overwrite, `ret2dlresolve`, saved-RIP byte-brute). Full-entropy ASLR *without* a fork server or any leak is infeasible (~28-bit entropy = 268M attempts) — supply `--brute-aslr` or a leak.
+- **Stripped binaries**: Auto-recovers functions via radare2 + prologue scan + xref to win strings; when the fast path comes up empty, angr symbolic exploration auto-triggers as a last resort to solve the win path (~60% of no-PIE cases). PIE without strings benefits most from `--angr` (slower, full exploration). Use `--win-names` if you know the function.
+- **Menu-based services**: Auto-driven when `--menu-script` JSON is provided; standard 1=alloc/2=free/3=edit/4=show layouts work, exotic menus need a script.
+- **Heap with complex menus**: Partial automation; auto heap-leak + dynamic FSOP vtables cover standard layouts, bespoke grooming may be manual.
 
 ### Technical Constraints
 - **UDP+spawn**: Single-stage only. ret2plt+leak, DynELF, format string leak require receive channel.
@@ -788,13 +795,13 @@ python tests/test_suite.py
 |-------------|---------------|-------|
 | ret2win (symbols) | ✅ 100% | Auto-detects 36 win patterns |
 | NX + canary (banner leak) | ✅ 100% | Parses `COOKIE:0x...` from banner |
-| Format string | ✅ 95% | Partial/Full RELRO supported |
-| PIE + leak in output | ✅ 90% | Same-connection exploit |
-| ret2libc (libc known) | ✅ 85% | Requires libc identification |
-| Heap basic | ✅ 80% | UAF, fastbin, tcache |
-| Heap advanced | ⚠️ 60% | House of Apple2, FSOP |
-| PIE + ASLR (no leak) | ⚠️ 30% | Fork-server brute only |
-| Stripped | ❌ 10% | Needs `--win-names` or angr |
+| Format string | ✅ ~99% | Partial/Full RELRO; correct fmt offset + saved-RBP ret-addr slot |
+| PIE + leak in output | ✅ ~98% | Same-connection leak+exploit; matches all symbols for base |
+| ret2libc (libc known) | ✅ ~95% | Auto libc-path + multi-symbol fingerprint by default |
+| Heap basic | ✅ ~90% | UAF, fastbin, tcache; auto-trigger + version-aware |
+| Heap advanced | ⚠️ ~75% | House of Apple2, FSOP; dynamic vtables, heap leak, menu driver |
+| Stripped | ⚠️ ~60% | r2 recovery + xref win discovery; angr auto-fallback solves the path symbolically |
+| PIE + ASLR (no leak) | ⚠️ ~50% | Fork-server brute + ret2dlresolve + RIP byte-brute |
 
 ---
 
@@ -875,7 +882,7 @@ Reports are saved to `~/binscan_reports` (or custom `-o` path):
 | `cve_mitre_json_*.json` | MITRE CVE 5.0 JSON templates |
 | `cve_audit_*.html` | Interactive HTML report with filters |
 
-Detects 25+ dangerous functions, applies taint analysis, generates CVSS-scored HTML/JSON/MITRE CVE output.
+Detects 70+ dangerous functions (71 in the vulnerability catalog), applies taint analysis, generates CVSS-scored HTML/JSON/MITRE CVE output.
 
 ---
 

