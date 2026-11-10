@@ -912,10 +912,4 @@ If BinSmasher has been useful in your research or competitions:
 
 ## Authors
 
-**AncientEncoder**
-
-**A. Canto** — InsecureWorld
-
-**V. Nos** — Cryptocalypse
-
 BinSmasher Team
